@@ -10,6 +10,8 @@ nr zespołu: 5
 
 **Autorzy:** Karolina Nitsch, Witold Nieć
 
+[repozytorium git](https://github.com/kanitsch/bazy_danych)
+
 
 --- 
 
@@ -42,11 +44,7 @@ Użytkownicy mogą korzystać z różnych funkcji, w zależności od ich ról w 
 ### Funkcje systemu
 - Zarządzanie dostepami do obszarów funkcjonalnych w oparciu o role w systemie
 - Przyznawanie i odbieranie dostępu do jednostek szkoleniowych na podstawie wykupionych usług i terminów ważności. 
-<!-- - Typy jednostek szkoleniowych: 
-    <!-- - spotkania online asynchroniczne
-    - spotkania online synchroniczne
-    - spotkania stacjonarne
-    - praktyki -->
+
 - Zarzadzanie dostępnością usług na podstawie limitów miejsc
 - Zarządzanie zaliczeniami jednostek szkoleniowych i produktów według zasad:
     - Studia - 80% frekwencji
@@ -72,7 +70,7 @@ Dziedziczy funkcje Użytkownika niezalogowanego.
 - możliwość zgłaszania problemów technicznych do administratora
 
 #### Zakupy i zarządzanie dostępnymi szkoleniami
-- Wyświetlnnie liczby zapisanych osób, dostepnych tłumaczeniach i limicie miejsc dla danego produktu
+- Wyświetlanie liczby zapisanych osób, dostepnych tłumaczeniach i limicie miejsc dla danego produktu
 - Dokonywanie zapisów poprzez koszyk zakupowy
 - Generowanie żądania linków do płatności 
   - płatność pełna za webinar - link ważny do momentu rozpoczecia webinaru
@@ -142,15 +140,20 @@ Dziedziczy funkcje Użytkownika niezalogowanego.
 - Wyświetlanie listy zgłoszonych problemów i możliwość odpowiadania klientom
 - Dostęp do szczegółowych informacji o wszystkich użytkownikach systemu
 - Dodawanie, usuwanie, modyfikowanie jednostek szkoleniowych i form kształcenia
-- Dodawanie i usuwanie użytkowników (Nauczyciel, Dyrektor)
+- Dodawanie i usuwanie użytkowników (Nauczyciel, Dyrektor, Księgowy)
 - Zarządzanie rolami
 - "awaryjne" zarzadzanie uprawnieniami i kontami Klientów
-
-### Dyrektor
-- zarządzanie zgodami na płatność odroczoną
-- zarządznie dyplomami - wydruki oraz rejestracja wydania dyplomu
+  
+### Księgowy
 - Raporty finansowe – zestawienie przychodów dla każdego webinaru/kursu/studium. 
 - Raport Lista „dłużników” – osoby, które skorzystały z usług, ale nie uiściły opłat. 
+
+### Dyrektor
+
+  Dziedziczy funkcje księgowego. Ponadto posiada dostęp do następujących funkcji:
+
+- zarządzanie zgodami na płatność odroczoną
+- zarządznie dyplomami - wydruki oraz rejestracja wydania dyplomu
 - Ogólny raport dotyczący liczby zapisanych osób na przyszłe wydarzenia (z informacją, czy wydarzenie jest stacjonarnie, czy zdalnie). 
 - Ogólny raport dotyczący frekwencji na zakończonych już wydarzeniach. 
 - Lista obecności dla każdego szkolenia z datą, imieniem, nazwiskiem i informacją czy uczestnik był obecny, czy nie. 
@@ -158,6 +161,4 @@ Dziedziczy funkcje Użytkownika niezalogowanego.
 - Dostęp do informacji o świadczonych usługach
 - Dostęp do szczegółowych informacji o wszystkich użytkownikach systemu
 
-### Księgowy
-- Raporty finansowe – zestawienie przychodów dla każdego webinaru/kursu/studium. 
-- Raport Lista „dłużników” – osoby, które skorzystały z usług, ale nie uiściły opłat. 
+
