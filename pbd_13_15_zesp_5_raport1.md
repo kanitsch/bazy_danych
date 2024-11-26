@@ -66,7 +66,7 @@ Użytkownicy mogą korzystać z różnych funkcji, w zależności od ich ról w 
 
 Dziedziczy funkcje Użytkownika niezalogowanego.
 
-### Ogólne 
+#### Ogólne 
 - możliwość zgłaszania problemów technicznych do administratora
 
 #### Zakupy i zarządzanie dostępnymi szkoleniami
