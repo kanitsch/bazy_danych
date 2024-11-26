@@ -2,6 +2,7 @@
 ---
 # Podstawy baz danych
 
+grupa: 13
 
 dzień i godz zajęć: środa 13:15
 
@@ -31,13 +32,14 @@ W systemie wyróżniamy następujące role:
 - Nauczyciel
 - Administrator
 - Dyrektor
+- Księgowy
   
-Użytkownicy mogą korzystać z różnych funkcji, w zależności od ich ról w systemie.
+Użytkownicy mogą korzystać z różnych funkcji, w zależności od ich ról w systemie. Role mogą być dziedziczone.
 
-## Funkcje systemu
+## Funkcje
 
 
-### Automatyczne
+### Funkcje systemu
 - Zarządzanie dostepami do obszarów funkcjonalnych w oparciu o role w systemie
 - Przyznawanie i odbieranie dostępu do jednostek szkoleniowych na podstawie wykupionych usług i terminów ważności. 
 <!-- - Typy jednostek szkoleniowych: 
@@ -50,7 +52,9 @@ Użytkownicy mogą korzystać z różnych funkcji, w zależności od ich ról w 
     - Studia - 80% frekwencji
     - Praktyki - 100% frekwencji
     - Kursy - zaliczenie 80% modułów
-- Odnotowywanie frekwencji na spotkaniach online
+- Rejestrowanie i odnotowywanie obecności wszystkich uczestników spotkań online (z podziałem na role)
+- Generowanie linków do płatności
+- Rejestrownie płatności
  
 ### Użytkownik niezalogowany
 - Przegladanie, wyszukiwanie dostępnych produktów (z informacją o ich termianch, dostepnosci cenach): 
@@ -62,11 +66,15 @@ Użytkownicy mogą korzystać z różnych funkcji, w zależności od ich ról w 
   
 ### Klient (użytkownik zalogowany)
 
+Dziedziczy funkcje Użytkownika niezalogowanego.
+
+### Ogólne 
+- możliwość zgłaszania problemów technicznych do administratora
+
 #### Zakupy i zarządzanie dostępnymi szkoleniami
-- Wyszukiwanie oferty dostępnych produktów 
 - Wyświetlnnie liczby zapisanych osób, dostepnych tłumaczeniach i limicie miejsc dla danego produktu
 - Dokonywanie zapisów poprzez koszyk zakupowy
-- Generowanie linków do płatności 
+- Generowanie żądania linków do płatności 
   - płatność pełna za webinar - link ważny do momentu rozpoczecia webinaru
   - płatność pełna za zajecia studyjne - link ważny do 3 dni przed rozpoczeciem kursu
   - płatość pełna za kurs - link ważny do 3 dni przed rozpoczeciem kursu
@@ -74,7 +82,7 @@ Użytkownicy mogą korzystać z różnych funkcji, w zależności od ich ról w 
   - płatność za zjazd w ramach studiów - link ważny do 3 dni przed rozpoczeciem zjazdu
   - dla każdej płatnosci istnieje możliwość zawnioskowania o płatność odroczona (wymaga akceptacji Dyrektora)
 - Integracja z operatorem płatności
-- Rejestrownie płatności za produkty
+<!-- - Rejestrownie płatności za produkty -->
 
 - Wyświetlanie aktualnej listy zamówionych usług szkoleniowych
 
@@ -109,7 +117,10 @@ Użytkownicy mogą korzystać z różnych funkcji, w zależności od ich ról w 
 
 ### Nauczyciel
 
+#### Ogólne
 
+- Wyświetlanie kalendarza/planu zajęć
+- Dołączanie do spotkań online (z odpowiednimi uprawnieniami zarządzania spotkaniem)
 
 #### Spotkania online asynchroniczne 
 - Nagrywanie spotkania i udostepnianie nagrań
@@ -127,7 +138,9 @@ Użytkownicy mogą korzystać z różnych funkcji, w zależności od ich ról w 
 
 
 ### Administrator
-  
+
+- Wyświetlanie listy zgłoszonych problemów i możliwość odpowiadania klientom
+- Dostęp do szczegółowych informacji o wszystkich użytkownikach systemu
 - Dodawanie, usuwanie, modyfikowanie jednostek szkoleniowych i form kształcenia
 - Dodawanie i usuwanie użytkowników (Nauczyciel, Dyrektor)
 - Zarządzanie rolami
@@ -143,6 +156,8 @@ Użytkownicy mogą korzystać z różnych funkcji, w zależności od ich ról w 
 - Lista obecności dla każdego szkolenia z datą, imieniem, nazwiskiem i informacją czy uczestnik był obecny, czy nie. 
 - Raport bilokacji: lista osób, które są zapisane na co najmniej dwa przyszłe szkolenia, które ze sobą kolidują czasowo. 
 - Dostęp do informacji o świadczonych usługach
+- Dostęp do szczegółowych informacji o wszystkich użytkownikach systemu
 
-
-
+### Księgowy
+- Raporty finansowe – zestawienie przychodów dla każdego webinaru/kursu/studium. 
+- Raport Lista „dłużników” – osoby, które skorzystały z usług, ale nie uiściły opłat. 
