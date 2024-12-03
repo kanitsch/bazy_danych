@@ -162,3 +162,5 @@ Dziedziczy funkcje Użytkownika niezalogowanego.
 - Dostęp do szczegółowych informacji o wszystkich użytkownikach systemu
 
 
+![Alt text](schemat_1.svg)
+
