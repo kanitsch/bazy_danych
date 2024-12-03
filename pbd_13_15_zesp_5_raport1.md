@@ -10,7 +10,7 @@ nr zespołu: 5
 
 **Autorzy:** Karolina Nitsch, Witold Nieć
 
-[repozytorium git](https://github.com/kanitsch/bazy_danych)
+https://github.com/kanitsch/bazy_danych
 
 
 --- 
