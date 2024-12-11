@@ -162,7 +162,7 @@ Dziedziczy funkcje Użytkownika niezalogowanego.
 - Dostęp do szczegółowych informacji o wszystkich użytkownikach systemu
 
 
-![Alt text](schemat_1.svg)
+![Alt text](schemat_2.svg)
 
 # Opis schematu
 
@@ -253,7 +253,7 @@ CREATE TABLE Subscriptions (
 
 **5. Products**
 
-Zawiera informacje o produktach oferowanych przez firmę. Produkty mogą obejmować webinary, studia, kursy, moduły, spotkania studyjne i praktyki.
+Zawiera informacje o produktach oferowanych przez firmę. Produkty mogą obejmować webinary, studia, kursy, zjazdy, spotkania studyjne i praktyki.
 Pola:
 
 - ProductID (PK) - unikalne ID produktu.
@@ -264,7 +264,7 @@ Pola:
 - EntryFee - opłata wstępna (jeśli obowiązuje).
 - MaxSeats - maksymalna liczba miejsc dostępnych dla danego produktu.
 - IsActive - informacja, czy produkt jest aktywny (bit).
-- SuperID (FK) - ID nadrzędnego produktu (np. moduł może być częścią większego kursu).
+- SuperID (FK) - ID nadrzędnego produktu (np. zjazd jest częścią studiów).
 - EndsWithDiploma - określenie, czy ukończenie produktu kończy się dyplomem (bit).
 ``` SQL
 CREATE TABLE Products (
@@ -318,7 +318,7 @@ CREATE TABLE PaymentDetails (
 
 **8. Meetings**
 
-Zawiera informacje o spotkaniach (np. wykładach, zajęciach).
+Zawiera informacje o spotkaniach (np. wykładach, zajęciach, egzaminach).
 Pola:
 
 - MeetingID (PK) - unikalne ID spotkania.
