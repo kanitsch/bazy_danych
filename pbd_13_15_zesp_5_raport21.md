@@ -185,7 +185,7 @@ CREATE TABLE Users (
     UserID int  NOT NULL,
     LastName nvarchar(20)  NOT NULL,
     FirstName nvarchar(20)  NOT NULL,
-    Email nvarchar(40)  NOT NULL,
+    Email nvarchar(40)  NOT NULL UNIQUE,
     Address nvarchar(100)  NULL,
     Password nvarchar(20)  NOT NULL,
     CONSTRAINT Users_pk PRIMARY KEY  (UserID)
@@ -273,7 +273,7 @@ ALTER TABLE Subscriptions ADD CONSTRAINT Participants_Users
 
 **5. Products**
 
-Zawiera informacje o produktach oferowanych przez firmę. Produkty mogą obejmować webinary, studia, kursy, semestry, zjazdy, spotkania studyjne egzaminy i praktyki. Struktura jest hierarchiczna - np. semestry są podproduktami studiów, a zjazdy podproduktami semestrów. Spotkania w tabelach Meetings i MeetingsAssingments należą do produktów znajdujących się najniżej w hierarchii.
+Zawiera informacje o produktach oferowanych przez firmę. Produkty mogą obejmować webinary, studia, kursy, semestry, zjazdy i spotkania studyjne. Struktura jest hierarchiczna - np. semestry są podproduktami studiów, a zjazdy podproduktami semestrów. Spotkania w tabelach Meetings i MeetingsAssingments należą do produktów znajdujących się najniżej w hierarchii.
 Pola:
 
 - ProductID (PK) - unikalne ID produktu.
@@ -301,7 +301,7 @@ CREATE TABLE Products (
 );
 
 ALTER TABLE Products ADD CONSTRAINT Products_ProductTypes
-    FOREIGN KEY (ProductID)
+    FOREIGN KEY (ProductTypeID)
     REFERENCES ProductTypes (ProductTypeID);
 
 ALTER TABLE Products ADD CONSTRAINT Products_Products
@@ -402,7 +402,7 @@ Pola:
 - StartDate - data rozpoczęcia spotkania.
 - EndDate - data zakończenia spotkania.
 - ComponentID (FK) - ID komponentu edukacyjnego, do którego należy spotkanie.
-- Location - miejsce, w którym odbywa się spotkanie.
+- Location - miejsce, w którym odbywa się spotkanie. Może to być adres lub link do platformy chmurowej w przypadku spotkań online.
 - MeetingType - typ spotkania (np. online, stacjonarne).
 - LinkToVideo - odnośnik do nagrania spotkania (jeśli istnieje).
 - TeacherID (FK) - ID nauczyciela prowadzącego spotkanie.
@@ -468,7 +468,7 @@ Pola:
 - MeetingID (FK) - ID spotkania.
 - SubID (FK) - ID subskrypcji użytkownika.
 - Presence - informacja o obecności użytkownika na spotkaniu (bit).
-- Grade - ocena uzyskana na spotkaniu (jeśli dotyczy).
+- Grade - ocena uzyskana na spotkaniu. Dotyczy egzaminów - oprócz 100% frekwencji trzeba uzyskać ocenę pozytywną.
 ``` SQL
 CREATE TABLE Attendance (
     MeetingID int  NOT NULL,
@@ -489,7 +489,7 @@ ALTER TABLE Attendance ADD CONSTRAINT Presence_Subscriptions
 
 **13. EduComponents**
 
-Zawiera dane o komponentach edukacyjnych, które są częścią produktów. Przykładowo komponentem jest przedmiot na studiach, który należy do semestru i może pojawiać się na wielu zjazdach, lub moduł, który należy do kursu. Komponenty grupują spotkania tematycznie i dodatkowo mają osobne zasady zaliczenia na podstawie obecności. Są potrzebne do wyświetlania sylabusa.
+Zawiera dane o komponentach edukacyjnych, które są częścią produktów. Przykładowo komponentem jest przedmiot na studiach, który należy do semestru i może pojawiać się na wielu zjazdach, lub moduł, który należy do kursu. Komponentami mogą być również egzaminy i praktyki. Komponenty grupują spotkania tematycznie i dodatkowo mają osobne zasady zaliczenia na podstawie obecności. Są potrzebne do wyświetlania sylabusa.
 
 Pola:
 
