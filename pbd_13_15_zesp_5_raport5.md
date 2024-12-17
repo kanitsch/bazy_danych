@@ -638,7 +638,7 @@ END
 
 ```
 ## Triggery
-accesAllowed - po opłaceniu zamówienia przyznawany jest dostęp do danej subskrybcji
+accesAllowed - tworzy rekordy w tabeli Frekwencja, aby zarezerwować rejestracje na przyszłe spotkania.
 ``` SQL
 SET ANSI_NULLS ON
 GO
@@ -732,5 +732,30 @@ declare
 	end 
 
 end
+END
+```
+
+paymentcheck - po opłaceniu zamówienia przyznawany jest dostęp do danej subskrybcji
+``` SQL
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE or ALTER TRIGGER [dbo].[paymentcheck]
+   ON  [dbo].[Payments]
+   AFTER INSERT,DELETE,UPDATE
+AS 
+BEGIN
+
+	update Subscriptions set AccessAllowed = 1
+	where SubID = (select pd.SubID from 
+	                  PaymentDetails pd, 
+					  inserted i
+					where i.PaymentID = pd.PaymentID)
+					
+	
+	SET NOCOUNT ON;
+
 END
 ```
