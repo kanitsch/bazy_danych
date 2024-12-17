@@ -184,7 +184,7 @@ Pola:
 CREATE TABLE Users (
     UserID int IDENTITY(1,1)  NOT NULL,
     LastName nvarchar(20)  NOT NULL,
-    FirstName nvarchar(20)  NOT NULL,
+    FirstName nvarchar(20)  NOT NULL UNIQUE,
     Email nvarchar(40)  NOT NULL,
     Address nvarchar(100)  NULL,
     Password nvarchar(20) CHECK (LEN(Password) BETWEEN 8 AND 20)  NOT NULL,
@@ -254,9 +254,9 @@ CREATE TABLE Subscriptions (
     AccessAllowed bit  NOT NULL,
     StartDate datetime  NOT NULL DEFAULT getdate(),
     EndDate datetime  NULL,
-    IsPassed bit  NOT NULL,
+    IsPassed bit  NOT NULL DEFAULT 0,
     PaymentDate datetime  NULL,
-    ReceivedDiploma bit  NOT NULL,
+    ReceivedDiploma bit  NOT NULL DEFAULT 0,
     CONSTRAINT Subscriptions_pk PRIMARY KEY  (SubID)
 );
 
@@ -289,7 +289,7 @@ Pola:
 ``` SQL
 CREATE TABLE Products (
     ProductID int IDENTITY(1,1)  NOT NULL,
-    ProductTypeID int  NOT NULL CHECK (ProductType in ('Studia', 'Kurs', 'Webinar', 'Spotkanie studyjne','Zjazd')),
+    ProductTypeID int  NOT NULL,
     ProductName nvarchar(40)  NOT NULL,
     Description text  NULL,
     FullPrice money  NULL,
@@ -638,7 +638,7 @@ END
 
 ```
 ## Triggery
-accesAllowed - tworzy rekordy w tabeli Frekwencja, aby zarezerwować rejestracje na przyszłe spotkania.
+accesAllowed - Po zmianie pola AccessAllowed na 1, tworzy rekordy w tabeli Attendance, aby umożliwić uczestnictwo i rejestrowanie obecności na spotkaniach w ramach danej subskrypcji. 
 ``` SQL
 SET ANSI_NULLS ON
 GO
