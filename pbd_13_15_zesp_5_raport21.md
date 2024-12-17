@@ -254,9 +254,9 @@ CREATE TABLE Subscriptions (
     AccessAllowed bit  NOT NULL,
     StartDate datetime  NULL,
     EndDate datetime  NULL,
-    IsPassed bit  NOT NULL,
+    IsPassed bit  NOT NULL DEFAULT 0,
     PaymentDate datetime  NULL,
-    ReceivedDiploma bit  NOT NULL,
+    ReceivedDiploma bit  NOT NULL DEFAULT 0,
     CONSTRAINT Subscriptions_pk PRIMARY KEY  (SubID)
 );
 
@@ -472,7 +472,7 @@ Pola:
 ``` SQL
 CREATE TABLE Attendance (
     MeetingID int  NOT NULL,
-    Presence bit  NOT NULL,
+    Presence bit  NOT NULL DEFAULT 0,
     SubID int  NOT NULL,
     Grade decimal(2,1)  NULL CHECK (Grade in (2.0,3.0,3.5,4.0,4.5,5.0)),
     CONSTRAINT Attendance_pk PRIMARY KEY  (MeetingID,SubID)
