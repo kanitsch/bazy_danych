@@ -162,12 +162,14 @@ Dziedziczy funkcje Użytkownika niezalogowanego.
 - Dostęp do informacji o świadczonych usługach
 - Dostęp do szczegółowych informacji o wszystkich użytkownikach systemu
 
+# 2.	Baza danych
 
-![Alt text](schemat_3.svg)
+## Schemat bazy danych
 
-# Opis schematu
+![Alt text](schemat3.svg)
 
-## Tabele:
+## Opis poszczególnych tabel
+
 
 **1. Users**
 W tabeli users znajują się informacje o wszystkich użytkownikach systemu.
@@ -297,6 +299,14 @@ CREATE TABLE Products (
     SuperID int  NULL,
     CONSTRAINT Products_pk PRIMARY KEY  (ProductID)
 );
+
+ALTER TABLE Products ADD CONSTRAINT Products_ProductTypes
+    FOREIGN KEY (ProductID)
+    REFERENCES ProductTypes (ProductTypeID);
+
+ALTER TABLE Products ADD CONSTRAINT Products_Products
+    FOREIGN KEY (SuperID)
+    REFERENCES Products (ProductID);
 ```
 
 **6. Product Types**
@@ -404,7 +414,8 @@ CREATE TABLE Meetings (
     StartDate datetime  NOT NULL,
     EndDate datetime  NOT NULL,
     ComponentID int  NULL,
-    MeetingType nvarchar(60)  NOT NULL CHECK (MeetingType in ('Egzamin', 'Spotkanie online asynchroniczne', 'Spotkanie online synchroniczne','Praktyka','Spotkanie stacjonarne')),
+    MeetingType nvarchar(60)  NOT NULL 
+        CHECK (MeetingType in ('Egzamin', 'Spotkanie online asynchroniczne', 'Spotkanie online synchroniczne','Praktyka','Spotkanie stacjonarne')),
     Location nvarchar(100)  NULL,
     TeacherID int  NOT NULL,
     LinkToVideo nvarchar(100)  NULL,
@@ -519,10 +530,10 @@ CREATE TABLE Languages (
 
 **15. Translations**
 
-Przechowuje informacje o tłumaczeniach wykonanych dla spotkań.
+Przechowuje informacje o dostępnych tłumaczeniach dla spotkań.
 Pola:
 
-- MeetingID (FK) - ID spotkania, które było tłumaczone.
+- MeetingID (FK) - ID spotkania.
 - TranslatorID (FK) - ID tłumacza.
 - TargetLanguageID (FK) - ID języka docelowego tłumaczenia.
 ``` SQL
