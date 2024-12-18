@@ -184,8 +184,8 @@ Pola:
 CREATE TABLE Users (
     UserID int IDENTITY(1,1)  NOT NULL,
     LastName nvarchar(20)  NOT NULL,
-    FirstName nvarchar(20)  NOT NULL UNIQUE,
-    Email nvarchar(40)  NOT NULL,
+    FirstName nvarchar(20)  NOT NULL,
+    Email nvarchar(40)  NOT NULL UNIQUE,
     Address nvarchar(100)  NULL,
     Password nvarchar(20) CHECK (LEN(Password) BETWEEN 8 AND 20)  NOT NULL,
     CONSTRAINT Users_pk PRIMARY KEY  (UserID)
