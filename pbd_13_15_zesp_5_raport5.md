@@ -166,7 +166,7 @@ Dziedziczy funkcje Użytkownika niezalogowanego.
 
 ## Schemat bazy danych
 
-![Alt text](schemat5.svg)
+![Alt text](baza.svg)
 
 ## Opis poszczególnych tabel
 
@@ -255,7 +255,7 @@ CREATE TABLE Subscriptions (
     StartDate datetime  NOT NULL DEFAULT getdate(),
     EndDate datetime  NULL,
     IsPassed bit  NOT NULL DEFAULT 0,
-    PaymentDate datetime  NULL,
+    PaymentDeadline datetime  NULL,
     ReceivedDiploma bit  NOT NULL DEFAULT 0,
     CONSTRAINT Subscriptions_pk PRIMARY KEY  (SubID)
 );
@@ -310,7 +310,7 @@ ALTER TABLE Products ADD CONSTRAINT Products_Products
 ```
 
 **6. Product Types**
-Zawiera szczegółowe informacje o poszczególnych typach produktów (webinary, studia, kursy, semestry, zjazdy, spotkania studyjne, egzaminy i praktyki). 
+Zawiera szczegółowe informacje o poszczególnych typach produktów (webinary, studia, kursy, zjazdy, spotkania studyjne, egzaminy i praktyki). 
 Pola:
 - ProductTypeID (PK) - unikalne ID typu
 - ProductTypeName - nazwa typu produktu (np. webinar, studia, itd.)
@@ -413,7 +413,7 @@ CREATE TABLE Meetings (
     MeetingID int  NOT NULL,
     StartDate datetime  NOT NULL,
     EndDate datetime  NOT NULL,
-    ComponentID int  NULL,
+    ComponentID int NOT NULL,
     MeetingType nvarchar(60)  NOT NULL 
         CHECK (MeetingType in ('Egzamin', 'Spotkanie online asynchroniczne', 'Spotkanie online synchroniczne','Praktyka','Spotkanie stacjonarne')),
     Location nvarchar(100)  NULL,
@@ -437,30 +437,7 @@ ALTER TABLE Meetings ADD CONSTRAINT Meetings_edu_units
     REFERENCES EduComponents (ComponentID);
 ```
 
-**11. MeetingsAssignments**
-
-Łączy spotkania z produktami, do których należą.
-Pola:
-
-- ProductID (FK) - ID produktu.
-- MeetingID (FK) - ID spotkania.
-``` SQL
-CREATE TABLE MeetingsAssignments (
-    ProductID int  NOT NULL,
-    MeetingID int  NOT NULL,
-    CONSTRAINT MeetingsAssignments_pk PRIMARY KEY  (ProductID,MeetingID)
-);
-
-ALTER TABLE MeetingsAssignments ADD CONSTRAINT Meetings_Assign_Meetings
-    FOREIGN KEY (MeetingID)
-    REFERENCES Meetings (MeetingID);
-
-ALTER TABLE MeetingsAssignments ADD CONSTRAINT Meetings_Assign_Products
-    FOREIGN KEY (ProductID)
-    REFERENCES Products (ProductID);
-```
-
-**12. Attendance**
+**11. Attendance**
 
 Zawiera informacje o obecności użytkowników na spotkaniach.
 Pola:
@@ -487,7 +464,7 @@ ALTER TABLE Attendance ADD CONSTRAINT Presence_Subscriptions
     REFERENCES Subscriptions (SubID);
 ```
 
-**13. EduComponents**
+**12. EduComponents**
 
 Zawiera dane o komponentach edukacyjnych, które są częścią produktów. Przykładowo komponentem jest przedmiot na studiach, który należy do semestru i może pojawiać się na wielu zjazdach, lub moduł, który należy do kursu. Komponentami mogą być również egzaminy i praktyki. Komponenty grupują spotkania tematycznie i dodatkowo mają osobne zasady zaliczenia na podstawie obecności. Są potrzebne do wyświetlania sylabusa.
 
@@ -513,7 +490,7 @@ ALTER TABLE EduComponents ADD CONSTRAINT EduComponents_Products
     REFERENCES Products (ProductID);
 ```
 
-**14. Languages**
+**13. Languages**
 
 Przechowuje listę dostępnych języków w systemie.
 Pola:
@@ -528,7 +505,7 @@ CREATE TABLE Languages (
 );
 ```
 
-**15. Translations**
+**14. Translations**
 
 Przechowuje informacje o dostępnych tłumaczeniach dla spotkań.
 Pola:
@@ -741,13 +718,13 @@ SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-
-CREATE or ALTER TRIGGER [dbo].[paymentcheck]
+ALTER   TRIGGER [dbo].[paymentcheck]
    ON  [dbo].[Payments]
-   AFTER INSERT,DELETE,UPDATE
+   AFTER UPDATE
 AS 
+IF (UPDATE (IsPaid) and (select IsPaid from inserted)=1 and (select ispaid from deleted)=0)
 BEGIN
-
+	SET NOCOUNT ON
 	update Subscriptions set AccessAllowed = 1
 	where SubID = (select pd.SubID from 
 	                  PaymentDetails pd, 
