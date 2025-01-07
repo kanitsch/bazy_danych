@@ -542,12 +542,6 @@ ALTER TABLE Translations ADD CONSTRAINT Translations_Users
 
 **vProductFreeSeats** - pokazuje wszystkie produkty wraz z aktualną liczbą wolnych miejsc
 ``` SQL
-SET ANSI_NULLS ON
-GO
-
-SET QUOTED_IDENTIFIER ON
-GO
-
 CREATE or alter VIEW [dbo].[vProductFreeSeats]
 AS
 SELECT    p.Description, p.EntryFee, p.FullPrice, p.ProductName, pt.ProductTypeName, dbo.freeseats(p.productid) 
@@ -557,23 +551,52 @@ where p.ProductTypeID = pt.ProductTypeID
 and p.IsActive = 1
 GO
 ```
+**debtors_list** - lista dłużników, czyli osób, które skorzystały z usług, ale nie uiściły opłat
+```SQL
+create view debtors_list
+as
+select u.UserID,u.FirstName,u.LastName,u.Email,u.Address, GETDATE()-s.PaymentDeadline as PaymentDelay, pd.Value
+from Users u
+join Subscriptions s
+on s.userid=u.UserID
+join Attendance a
+on a.SubID=s.SubID
+join PaymentDetails pd
+on pd.SubID=s.SubID
+join Payments p
+on p.PaymentID = pd.PaymentID
+where p.IsPaid=0 and a.Presence=1
+and GETDATE()>s.PaymentDeadline
+```
 **vTeachers** - wypisuje wszystkich nauczycieli
 ``` SQL
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE or alter FUNCTION dbo.freeseats
-(	
-	@p_productid as int
-)
-RETURNS int 
+CREATE VIEW [dbo].[vTeachers]
 AS
-begin
-	return (SELECT max(p.MaxSeats) -count(s.productid)  from Subscriptions s, Products p
-	where s.ProductID = p.ProductID and
-	s.ProductID = @p_productid)
-end
+SELECT     u.UserID, u.LastName, u.FirstName
+FROM        dbo.Users AS u INNER JOIN
+                  dbo.UserToRole AS ur ON u.UserID = ur.UserID INNER JOIN
+                  dbo.Roles AS r ON ur.RoleID = r.RoleID
+WHERE     (r.RoleName = 'Nauczyciel')
+```
+**vTranslators** - wypisuje wszystkich tłumaczy
+```SQL
+ALTER   VIEW [dbo].[vTranslators]
+AS
+SELECT     u.UserID, u.LastName, u.FirstName
+FROM        dbo.Users AS u INNER JOIN
+                  dbo.UserToRole AS ur ON u.UserID = ur.UserID INNER JOIN
+                  dbo.Roles AS r ON ur.RoleID = r.RoleID
+WHERE     (r.RoleName='Translator')
+```
+**vClients** - wypisuje wszystkich klientów
+```SQL
+ALTER   VIEW [dbo].[vClients]
+AS
+SELECT     u.UserID, u.LastName, u.FirstName
+FROM        dbo.Users AS u INNER JOIN
+                  dbo.UserToRole AS ur ON u.UserID = ur.UserID INNER JOIN
+                  dbo.Roles AS r ON ur.RoleID = r.RoleID
+WHERE     (r.RoleName = 'Klient')
 ```
 **v_users_roles** - wypisuje użytkowników i ich role w systemie (id użytkownika, imię, nazwisko, rola)
 ```SQL
@@ -628,6 +651,227 @@ BEGIN
 END
 
 ```
+**GetUserBasket** - wyświetla koszyk danego użytkownika
+```SQL
+CREATE FUNCTION GetUserBasket (@UserID INT)
+RETURNS TABLE
+AS
+RETURN
+(
+    SELECT 
+        b.ProductID,
+        p.ProductName,
+        pt.ProductTypeName,
+		case
+			when b.OnlyAdvance = 1 THEN p.EntryFee
+            ELSE p.FullPrice
+        END AS Price
+        ,
+        b.OnlyAdvance
+    FROM 
+        Basket b
+    INNER JOIN Products p ON b.ProductID = p.ProductID
+    INNER JOIN ProductTypes pt ON p.ProductTypeID = pt.ProductTypeID
+    WHERE 
+        b.UserID = @UserID
+);
+```
+**GetProductsByID** - wypisuje ID produktu i wszystkich podproduktów (również podpodproduktów). Przydatne do tworzenia subskrypcji dla zakupionego produktu.
+```SQL
+CREATE FUNCTION GetProductsByID (@ProductID INT)
+RETURNS TABLE
+AS
+RETURN
+(
+    WITH ProductsLevel1 AS 
+    (
+        SELECT 
+            p.ProductID
+        FROM 
+            Products p
+        WHERE 
+            p.ProductID = @ProductID
+    ),
+    ProductsLevel2 AS 
+    (
+        SELECT 
+            p.ProductID
+        FROM 
+            Products p
+        INNER JOIN ProductsLevel1 l1 ON p.SuperID = l1.ProductID
+    ),
+    ProductsLevel3 AS 
+    (
+        SELECT 
+            p.ProductID
+        FROM 
+            Products p
+        INNER JOIN ProductsLevel2 l2 ON p.SuperID = l2.ProductID
+    )
+    SELECT * 
+    FROM ProductsLevel1
+    UNION 
+    SELECT * 
+    FROM ProductsLevel2
+    UNION 
+    SELECT * 
+    FROM ProductsLevel3
+);
+```
+**GetProductTypeName** - zwraca typ produktu dla produktu o podanym ID (funkcja pomocnicza)
+```SQL
+ALTER FUNCTION [dbo].[GetProductTypeName] (@ProductID INT)
+RETURNS NVARCHAR(40)
+AS
+BEGIN
+    DECLARE @ProductTypeName NVARCHAR(40);
+
+    SELECT 
+        @ProductTypeName = pt.ProductTypeName
+    FROM 
+        Products p
+    INNER JOIN 
+        ProductTypes pt ON p.ProductTypeID = pt.ProductTypeID
+    WHERE 
+        p.ProductID = @ProductID;
+
+    RETURN @ProductTypeName;
+END;
+```
+**AddToBasket** - funkcja dodaje produkt do koszyka danego użytkownika (z OnlyAdvance ustawionym na 0).
+```SQL
+CREATE PROCEDURE AddToBasket
+    @UserID INT,
+    @ProductID INT
+AS
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM Users WHERE UserID = @UserID)
+    BEGIN
+        RAISERROR ('Użytkownik nie istnieje', 16, 1);
+        RETURN;
+    END;
+
+    IF NOT EXISTS (SELECT 1 FROM Products WHERE ProductID = @ProductID)
+    BEGIN
+        RAISERROR ('Produkt nie istnieje', 16, 1);
+        RETURN;
+    END;
+
+    if (select isactive from products where ProductID=@ProductID)=0
+	BEGIN
+        RAISERROR ('Produkt jest nieaktywny', 16, 1);
+        RETURN;
+    END;
+
+	if (select IsForSale from Products p join ProductTypes pt
+	on pt.ProductTypeID=p.ProductTypeID
+	where ProductID=@ProductID)=0
+	BEGIN
+        RAISERROR ('Produkt nie jest na sprzedaż', 16, 1);
+        RETURN;
+    END;
+
+    IF EXISTS (SELECT 1 FROM Basket WHERE UserID = @UserID AND ProductID = @ProductID)
+    BEGIN
+        RAISERROR ('Produkt już znajduje się w koszyku', 16, 1);
+        RETURN;
+    END;
+
+    INSERT INTO Basket (UserID, ProductID,OnlyAdvance)
+    VALUES (@UserID, @ProductID,0);
+
+END;
+```
+**PayOnlyAdvance** - ustawia OnlyAdvance na 1, jeżeli jest możliwość zapłaty samej zaliczki dla podanego produktu.
+```SQL
+create procedure PayOnlyAdvance
+	@UserID int,
+	@ProdID int
+as
+begin
+if not exists (select 1 from Basket
+where @UserID=UserID
+and @ProdID=ProductID)
+begin
+	raiserror ('Podany użytkownik nie posiada tego produktu w koszyku',16,1)
+	return;
+end;
+if (select entryfee from Products p
+where p.ProductID=@ProdID) is null
+begin
+	raiserror ('Płatność ratalna nie jest możliwa',16,1)
+	return;
+end;
+update Basket
+set OnlyAdvance = 1
+where ProductID=@ProdID
+and UserID=@UserID;
+end;
+```
+**PayFullPrice** - zmienia OnlyAdvance na 0
+```SQL
+create procedure PayFullPrice
+	@UserID int,
+	@ProdID int
+as
+begin
+if not exists (select 1 from Basket
+where @UserID=UserID
+and @ProdID=ProductID)
+begin
+	raiserror ('Podany użytkownik nie posiada tego produktu w koszyku',16,1)
+	return;
+end;
+
+update Basket
+set OnlyAdvance = 0
+where ProductID=@ProdID
+and UserID=@UserID;
+end;
+```
+**DeleteFromBasket** - usuwa wybrany produkt z koszyka użytkownika
+```SQL
+create procedure DeleteFromBasket
+	@UserID int,
+	@ProdID int
+as
+begin
+if not exists (select 1 from Basket
+where @UserID=UserID
+and @ProdID=ProductID)
+begin
+	raiserror ('Podany użytkownik nie posiada tego produktu w koszyku',16,1)
+	return;
+end;
+
+delete from Basket
+where ProductID=@ProdID
+and UserID=@UserID;
+end;
+```
+**BuyNow** - przenosi produkty danego użytkownika z koszyka do subskrypcji z AccessAllowed ustawionym na 0.
+```SQL 
+CREATE procedure [dbo].[BuyNow]
+	@UserID int
+as
+begin
+if not exists (select 1 from Basket
+where @UserID=UserID)
+begin
+	raiserror ('Podany użytkownik nie posiada produktów w koszyku',16,1)
+	return;
+end;
+insert into Subscriptions(UserID,ProductID,AccessAllowed)
+select @UserID, p.ProductID, 0
+from Products p,
+Basket b
+where p.ProductID in (select * from GetProductsByID(b.ProductID)) and b.UserID=@UserID;
+
+delete from Basket
+where UserID=@UserID;
+end;
+```
+
 ## Triggery
 
 **validateMeetingProduct** - uniemożliwia wpisanie spotkania przypisanego do produktu, który nie należy do produktu z tabeli EduComponents dla danego ComponentID.
@@ -654,6 +898,51 @@ BEGIN
     END
 END;
 
+```
+**only_translators** - uniemożliwia wpisania jako tłumacza użytkownika, który nie pełni tej roli w systemie
+```SQL
+create trigger only_translators
+on dbo.Translations
+after insert, update
+as
+begin
+	if not exists 
+	(select 1 from vTranslators t
+	join inserted i
+	on i.TranslatorID=t.UserID)
+	BEGIN
+        RAISERROR ('Podany użytkownik nie jest translatorem', 16, 2);
+        ROLLBACK TRANSACTION;
+    END
+end
+```
+**check_teacher** - uniemożliwia wpisania jako nauczyciela użytkownika, który nie pełni tej roli w systemie. Sprawdza czy podany nauczyciel nie prowadzi w tym czasie innego spotkania. (wyjątek - studia i spotkanie studyjne)
+```SQL
+ALTER trigger [dbo].[check_teacher]
+on [dbo].[Meetings]
+after insert, update
+as
+begin
+	if not exists 
+	(select 1 from vTeachers t
+	join inserted i
+	on i.TeacherID=t.UserID)
+	BEGIN
+        RAISERROR ('Podany użytkownik nie jest nauczycielem', 16, 3);
+        ROLLBACK TRANSACTION;
+    END
+	if exists
+	(select 1 from Meetings m
+	join inserted i
+	on i.TeacherID=m.TeacherID
+	where ((i.StartDate<m.EndDate and i.StartDate>m.StartDate) or (m.StartDate<i.EndDate and m.StartDate>i.StartDate))
+	and ((select dbo.GetProductTypeName(i.productid))!='spotkanie studyjne' or (select dbo.GetProductTypeName(m.productid))!='zjazd'))
+		BEGIN
+        RAISERROR ('Podany nauczyciel prowadzi w tym czasie inne spotkanie', 16, 4);
+        ROLLBACK TRANSACTION;
+    END
+	
+end
 ```
 
 **accesAllowed** - Po zmianie pola AccessAllowed na 1, tworzy rekordy w tabeli Attendance, aby umożliwić uczestnictwo i rejestrowanie obecności na spotkaniach w ramach danej subskrypcji. 
