@@ -413,7 +413,7 @@ CREATE TABLE Meetings (
     MeetingID int  NOT NULL,
     StartDate datetime  NOT NULL,
     EndDate datetime  NOT NULL,
-    ComponentID int NOT NULL,
+    ComponentID int NULL,
     MeetingType nvarchar(60)  NOT NULL 
         CHECK (MeetingType in ('Egzamin', 'Spotkanie online asynchroniczne', 'Spotkanie online synchroniczne','Praktyka','Spotkanie stacjonarne')),
     Location nvarchar(100)  NULL,
@@ -427,6 +427,10 @@ CREATE TABLE Meetings (
 ALTER TABLE Meetings ADD CONSTRAINT Meetings_Languages
     FOREIGN KEY (LanguageID)
     REFERENCES Languages (LanguageID);
+
+ALTER TABLE Meetings ADD CONSTRAINT FK_Meetings_Products
+    FOREIGN KEY (ProductID)
+    REFERENCES Products (ProductID);
 
 ALTER TABLE Meetings ADD CONSTRAINT Meetings_Teachers
     FOREIGN KEY (TeacherID)
@@ -536,7 +540,7 @@ ALTER TABLE Translations ADD CONSTRAINT Translations_Users
 
 ## Widoki
 
-vProductFreeSeats - pokazuje wszystkie produkty wraz z aktualną liczbą wolnych miejsc
+**vProductFreeSeats** - pokazuje wszystkie produkty wraz z aktualną liczbą wolnych miejsc
 ``` SQL
 SET ANSI_NULLS ON
 GO
@@ -553,7 +557,7 @@ where p.ProductTypeID = pt.ProductTypeID
 and p.IsActive = 1
 GO
 ```
-vTeachers - wypisuje wszystkich nauczycieli
+**vTeachers** - wypisuje wszystkich nauczycieli
 ``` SQL
 SET ANSI_NULLS ON
 GO
@@ -571,9 +575,19 @@ begin
 	s.ProductID = @p_productid)
 end
 ```
+**v_users_roles** - wypisuje użytkowników i ich role w systemie (id użytkownika, imię, nazwisko, rola)
+```SQL
+create view v_users_roles
+as
+select u.userid, FirstName, LastName, RoleName
+from Users u join UserToRole utr
+on utr.UserID=u.UserID
+join Roles r
+on r.RoleID=utr.RoleID
+```
 
 ## Funkcje
-freeseats - pokazuje liczbę wolnych miejsc dla produktu o podanym ID
+**freeseats** - pokazuje liczbę wolnych miejsc dla produktu o podanym ID
 ``` SQL
 SET ANSI_NULLS ON
 GO
@@ -592,7 +606,7 @@ begin
 	s.ProductID = @p_productid)
 end
 ```
-getProfits - pokazuje zyski ze sprzedaży produktów dla podanego okresu
+**getProfits** - pokazuje zyski ze sprzedaży produktów dla podanego okresu
 ``` SQL
 SET ANSI_NULLS ON
 GO
@@ -615,13 +629,35 @@ END
 
 ```
 ## Triggery
-accesAllowed - Po zmianie pola AccessAllowed na 1, tworzy rekordy w tabeli Attendance, aby umożliwić uczestnictwo i rejestrowanie obecności na spotkaniach w ramach danej subskrypcji. 
-``` SQL
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
 
+**validateMeetingProduct** - uniemożliwia wpisanie spotkania przypisanego do produktu, który nie należy do produktu z tabeli EduComponents dla danego ComponentID.
+Przykładowo, można wpisać spotkanie w ramach kursu, tylko jeżeli komponent również należy do tego kursu.
+W przypadku studiów produkt może być zjazdem, a komponent może należeć do semestru, w ramach którego odbywa się ten zjazd.
+```SQL
+ALTER TRIGGER [dbo].[validateMeetingProduct]
+ON [dbo].[Meetings]
+AFTER INSERT, UPDATE
+AS
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+		join Products p on p.ProductID=i.ProductID
+		join EduComponents ec on ec.ComponentID=i.ComponentID
+		where i.ComponentID is not null
+		and (p.ProductID!=ec.ProductID and p.SuperID is not null and p.SuperID!=ec.ProductID)
+		or (p.SuperID is null and p.ProductID!=ec.ProductID)
+    )
+    BEGIN
+        RAISERROR ('ProductID w tabeli Meetings nie należy do ProductID z EduComponents dla danego ComponentID', 16, 1);
+        ROLLBACK TRANSACTION;
+    END
+END;
+
+```
+
+**accesAllowed** - Po zmianie pola AccessAllowed na 1, tworzy rekordy w tabeli Attendance, aby umożliwić uczestnictwo i rejestrowanie obecności na spotkaniach w ramach danej subskrypcji. 
+``` SQL
 ALTER TRIGGER [dbo].[access_allowed] 
    ON  [dbo].[Subscriptions]
    AFTER  UPDATE 
@@ -632,20 +668,17 @@ BEGIN
 	insert into Attendance (MeetingId, SubID)
 	(select m.MeetingID, SubID
 	from Products p 
-	join MeetingsAssignments ma
-	on p.ProductID = ma.ProductID
 	join Meetings m
-	on m.MeetingID=ma.MeetingID
+	on p.ProductID=m.ProductID
 	join inserted i
 	on i.ProductID=p.ProductID
 	and not exists(select 1 from Attendance a where (a.SubID=i.SubID and a.MeetingID=m.MeetingID)) 
 	) 
-
 END
 
 ```
 
-checkPass - po każdym wprowadzeniu obecności dla studiów sprawdzany jest stan zaliczenia
+**checkPass** - po każdym wprowadzeniu obecności dla studiów sprawdzany jest stan zaliczenia
 ``` SQL
 SET ANSI_NULLS ON
 GO
@@ -712,7 +745,7 @@ end
 END
 ```
 
-paymentcheck - po opłaceniu zamówienia przyznawany jest dostęp do danej subskrybcji
+**paymentcheck** - po opłaceniu zamówienia przyznawany jest dostęp do danej subskrybcji
 ``` SQL
 SET ANSI_NULLS ON
 GO
