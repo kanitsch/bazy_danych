@@ -904,6 +904,7 @@ END
 ``` 
 ## Triggery
 
+
 **validateMeetingProduct** - uniemożliwia wpisanie spotkania przypisanego do produktu, który nie należy do produktu z tabeli EduComponents dla danego ComponentID.
 Przykładowo, można wpisać spotkanie w ramach kursu, tylko jeżeli komponent również należy do tego kursu.
 W przypadku studiów produkt może być zjazdem, a komponent może należeć do semestru, w ramach którego odbywa się ten zjazd.
@@ -997,7 +998,8 @@ END
 
 ```
 
-<!-- **checkPass** - po każdym wprowadzeniu obecności dla studiów sprawdzany jest stan zaliczenia
+**checkPass** - po każdym wprowadzeniu obecności dla studiów sprawdzany jest stan zaliczenia
+
 ``` SQL
 SET ANSI_NULLS ON
 GO
