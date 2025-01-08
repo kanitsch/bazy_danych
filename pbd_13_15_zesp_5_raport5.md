@@ -166,7 +166,7 @@ Dziedziczy funkcje Użytkownika niezalogowanego.
 
 ## Schemat bazy danych
 
-![Alt text](schemat5.svg)
+![Alt text](baza.svg)
 
 ## Opis poszczególnych tabel
 
@@ -185,7 +185,7 @@ CREATE TABLE Users (
     UserID int IDENTITY(1,1)  NOT NULL,
     LastName nvarchar(20)  NOT NULL,
     FirstName nvarchar(20)  NOT NULL,
-    Email nvarchar(40)  NOT NULL,
+    Email nvarchar(40)  NOT NULL UNIQUE,
     Address nvarchar(100)  NULL,
     Password nvarchar(20) CHECK (LEN(Password) BETWEEN 8 AND 20)  NOT NULL,
     CONSTRAINT Users_pk PRIMARY KEY  (UserID)
@@ -254,9 +254,9 @@ CREATE TABLE Subscriptions (
     AccessAllowed bit  NOT NULL,
     StartDate datetime  NOT NULL DEFAULT getdate(),
     EndDate datetime  NULL,
-    IsPassed bit  NOT NULL,
-    PaymentDate datetime  NULL,
-    ReceivedDiploma bit  NOT NULL,
+    IsPassed bit  NOT NULL DEFAULT 0,
+    PaymentDeadline datetime  NULL,
+    ReceivedDiploma bit  NOT NULL DEFAULT 0,
     CONSTRAINT Subscriptions_pk PRIMARY KEY  (SubID)
 );
 
@@ -289,7 +289,7 @@ Pola:
 ``` SQL
 CREATE TABLE Products (
     ProductID int IDENTITY(1,1)  NOT NULL,
-    ProductTypeID int  NOT NULL CHECK (ProductType in ('Studia', 'Kurs', 'Webinar', 'Spotkanie studyjne','Zjazd')),
+    ProductTypeID int  NOT NULL,
     ProductName nvarchar(40)  NOT NULL,
     Description text  NULL,
     FullPrice money  NULL,
@@ -310,7 +310,7 @@ ALTER TABLE Products ADD CONSTRAINT Products_Products
 ```
 
 **6. Product Types**
-Zawiera szczegółowe informacje o poszczególnych typach produktów (webinary, studia, kursy, semestry, zjazdy, spotkania studyjne, egzaminy i praktyki). 
+Zawiera szczegółowe informacje o poszczególnych typach produktów (webinary, studia, kursy, zjazdy, spotkania studyjne, egzaminy i praktyki). 
 Pola:
 - ProductTypeID (PK) - unikalne ID typu
 - ProductTypeName - nazwa typu produktu (np. webinar, studia, itd.)
@@ -413,7 +413,7 @@ CREATE TABLE Meetings (
     MeetingID int  NOT NULL,
     StartDate datetime  NOT NULL,
     EndDate datetime  NOT NULL,
-    ComponentID int  NULL,
+    ComponentID int NULL,
     MeetingType nvarchar(60)  NOT NULL 
         CHECK (MeetingType in ('Egzamin', 'Spotkanie online asynchroniczne', 'Spotkanie online synchroniczne','Praktyka','Spotkanie stacjonarne')),
     Location nvarchar(100)  NULL,
@@ -428,6 +428,10 @@ ALTER TABLE Meetings ADD CONSTRAINT Meetings_Languages
     FOREIGN KEY (LanguageID)
     REFERENCES Languages (LanguageID);
 
+ALTER TABLE Meetings ADD CONSTRAINT FK_Meetings_Products
+    FOREIGN KEY (ProductID)
+    REFERENCES Products (ProductID);
+
 ALTER TABLE Meetings ADD CONSTRAINT Meetings_Teachers
     FOREIGN KEY (TeacherID)
     REFERENCES Users (UserID);
@@ -437,30 +441,7 @@ ALTER TABLE Meetings ADD CONSTRAINT Meetings_edu_units
     REFERENCES EduComponents (ComponentID);
 ```
 
-**11. MeetingsAssignments**
-
-Łączy spotkania z produktami, do których należą.
-Pola:
-
-- ProductID (FK) - ID produktu.
-- MeetingID (FK) - ID spotkania.
-``` SQL
-CREATE TABLE MeetingsAssignments (
-    ProductID int  NOT NULL,
-    MeetingID int  NOT NULL,
-    CONSTRAINT MeetingsAssignments_pk PRIMARY KEY  (ProductID,MeetingID)
-);
-
-ALTER TABLE MeetingsAssignments ADD CONSTRAINT Meetings_Assign_Meetings
-    FOREIGN KEY (MeetingID)
-    REFERENCES Meetings (MeetingID);
-
-ALTER TABLE MeetingsAssignments ADD CONSTRAINT Meetings_Assign_Products
-    FOREIGN KEY (ProductID)
-    REFERENCES Products (ProductID);
-```
-
-**12. Attendance**
+**11. Attendance**
 
 Zawiera informacje o obecności użytkowników na spotkaniach.
 Pola:
@@ -487,7 +468,7 @@ ALTER TABLE Attendance ADD CONSTRAINT Presence_Subscriptions
     REFERENCES Subscriptions (SubID);
 ```
 
-**13. EduComponents**
+**12. EduComponents**
 
 Zawiera dane o komponentach edukacyjnych, które są częścią produktów. Przykładowo komponentem jest przedmiot na studiach, który należy do semestru i może pojawiać się na wielu zjazdach, lub moduł, który należy do kursu. Komponentami mogą być również egzaminy i praktyki. Komponenty grupują spotkania tematycznie i dodatkowo mają osobne zasady zaliczenia na podstawie obecności. Są potrzebne do wyświetlania sylabusa.
 
@@ -513,7 +494,7 @@ ALTER TABLE EduComponents ADD CONSTRAINT EduComponents_Products
     REFERENCES Products (ProductID);
 ```
 
-**14. Languages**
+**13. Languages**
 
 Przechowuje listę dostępnych języków w systemie.
 Pola:
@@ -528,7 +509,7 @@ CREATE TABLE Languages (
 );
 ```
 
-**15. Translations**
+**14. Translations**
 
 Przechowuje informacje o dostępnych tłumaczeniach dla spotkań.
 Pola:
@@ -559,14 +540,8 @@ ALTER TABLE Translations ADD CONSTRAINT Translations_Users
 
 ## Widoki
 
-vProductFreeSeats - pokazuje wszystkie produkty wraz z aktualną liczbą wolnych miejsc
+**vProductFreeSeats** - pokazuje wszystkie produkty wraz z aktualną liczbą wolnych miejsc
 ``` SQL
-SET ANSI_NULLS ON
-GO
-
-SET QUOTED_IDENTIFIER ON
-GO
-
 CREATE or alter VIEW [dbo].[vProductFreeSeats]
 AS
 SELECT    p.Description, p.EntryFee, p.FullPrice, p.ProductName, pt.ProductTypeName, dbo.freeseats(p.productid) 
@@ -576,27 +551,66 @@ where p.ProductTypeID = pt.ProductTypeID
 and p.IsActive = 1
 GO
 ```
-vTeachers - wypisuje wszystkich nauczycieli
+**debtors_list** - lista dłużników, czyli osób, które skorzystały z usług, ale nie uiściły opłat
+```SQL
+create view debtors_list
+as
+select u.UserID,u.FirstName,u.LastName,u.Email,u.Address, GETDATE()-s.PaymentDeadline as PaymentDelay, pd.Value
+from Users u
+join Subscriptions s
+on s.userid=u.UserID
+join Attendance a
+on a.SubID=s.SubID
+join PaymentDetails pd
+on pd.SubID=s.SubID
+join Payments p
+on p.PaymentID = pd.PaymentID
+where p.IsPaid=0 and a.Presence=1
+and GETDATE()>s.PaymentDeadline
+```
+**vTeachers** - wypisuje wszystkich nauczycieli
 ``` SQL
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE or alter FUNCTION dbo.freeseats
-(	
-	@p_productid as int
-)
-RETURNS int 
+CREATE VIEW [dbo].[vTeachers]
 AS
-begin
-	return (SELECT max(p.MaxSeats) -count(s.productid)  from Subscriptions s, Products p
-	where s.ProductID = p.ProductID and
-	s.ProductID = @p_productid)
-end
+SELECT     u.UserID, u.LastName, u.FirstName
+FROM        dbo.Users AS u INNER JOIN
+                  dbo.UserToRole AS ur ON u.UserID = ur.UserID INNER JOIN
+                  dbo.Roles AS r ON ur.RoleID = r.RoleID
+WHERE     (r.RoleName = 'Nauczyciel')
+```
+**vTranslators** - wypisuje wszystkich tłumaczy
+```SQL
+ALTER   VIEW [dbo].[vTranslators]
+AS
+SELECT     u.UserID, u.LastName, u.FirstName
+FROM        dbo.Users AS u INNER JOIN
+                  dbo.UserToRole AS ur ON u.UserID = ur.UserID INNER JOIN
+                  dbo.Roles AS r ON ur.RoleID = r.RoleID
+WHERE     (r.RoleName='Translator')
+```
+**vClients** - wypisuje wszystkich klientów
+```SQL
+ALTER   VIEW [dbo].[vClients]
+AS
+SELECT     u.UserID, u.LastName, u.FirstName
+FROM        dbo.Users AS u INNER JOIN
+                  dbo.UserToRole AS ur ON u.UserID = ur.UserID INNER JOIN
+                  dbo.Roles AS r ON ur.RoleID = r.RoleID
+WHERE     (r.RoleName = 'Klient')
+```
+**v_users_roles** - wypisuje użytkowników i ich role w systemie (id użytkownika, imię, nazwisko, rola)
+```SQL
+create view v_users_roles
+as
+select u.userid, FirstName, LastName, RoleName
+from Users u join UserToRole utr
+on utr.UserID=u.UserID
+join Roles r
+on r.RoleID=utr.RoleID
 ```
 
 ## Funkcje
-freeseats - pokazuje liczbę wolnych miejsc dla produktu o podanym ID
+**freeseats** - pokazuje liczbę wolnych miejsc dla produktu o podanym ID
 ``` SQL
 SET ANSI_NULLS ON
 GO
@@ -615,7 +629,7 @@ begin
 	s.ProductID = @p_productid)
 end
 ```
-getProfits - pokazuje zyski ze sprzedaży produktów dla podanego okresu
+**getProfits** - pokazuje zyski ze sprzedaży produktów dla podanego okresu
 ``` SQL
 SET ANSI_NULLS ON
 GO
@@ -637,14 +651,332 @@ BEGIN
 END
 
 ```
-## Triggery
-accesAllowed - tworzy rekordy w tabeli Frekwencja, aby zarezerwować rejestracje na przyszłe spotkania.
-``` SQL
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
+**GetUserBasket** - wyświetla koszyk danego użytkownika
+```SQL
+CREATE FUNCTION GetUserBasket (@UserID INT)
+RETURNS TABLE
+AS
+RETURN
+(
+    SELECT 
+        b.ProductID,
+        p.ProductName,
+        pt.ProductTypeName,
+		case
+			when b.OnlyAdvance = 1 THEN p.EntryFee
+            ELSE p.FullPrice
+        END AS Price
+        ,
+        b.OnlyAdvance
+    FROM 
+        Basket b
+    INNER JOIN Products p ON b.ProductID = p.ProductID
+    INNER JOIN ProductTypes pt ON p.ProductTypeID = pt.ProductTypeID
+    WHERE 
+        b.UserID = @UserID
+);
+```
+**GetProductsByID** - wypisuje ID produktu i wszystkich podproduktów (również podpodproduktów). Przydatne do tworzenia subskrypcji dla zakupionego produktu.
+```SQL
+CREATE FUNCTION GetProductsByID (@ProductID INT)
+RETURNS TABLE
+AS
+RETURN
+(
+    WITH ProductsLevel1 AS 
+    (
+        SELECT 
+            p.ProductID
+        FROM 
+            Products p
+        WHERE 
+            p.ProductID = @ProductID
+    ),
+    ProductsLevel2 AS 
+    (
+        SELECT 
+            p.ProductID
+        FROM 
+            Products p
+        INNER JOIN ProductsLevel1 l1 ON p.SuperID = l1.ProductID
+    ),
+    ProductsLevel3 AS 
+    (
+        SELECT 
+            p.ProductID
+        FROM 
+            Products p
+        INNER JOIN ProductsLevel2 l2 ON p.SuperID = l2.ProductID
+    )
+    SELECT * 
+    FROM ProductsLevel1
+    UNION 
+    SELECT * 
+    FROM ProductsLevel2
+    UNION 
+    SELECT * 
+    FROM ProductsLevel3
+);
+```
+**GetProductTypeName** - zwraca typ produktu dla produktu o podanym ID (funkcja pomocnicza)
+```SQL
+ALTER FUNCTION [dbo].[GetProductTypeName] (@ProductID INT)
+RETURNS NVARCHAR(40)
+AS
+BEGIN
+    DECLARE @ProductTypeName NVARCHAR(40);
 
+    SELECT 
+        @ProductTypeName = pt.ProductTypeName
+    FROM 
+        Products p
+    INNER JOIN 
+        ProductTypes pt ON p.ProductTypeID = pt.ProductTypeID
+    WHERE 
+        p.ProductID = @ProductID;
+
+    RETURN @ProductTypeName;
+END;
+```
+**AddToBasket** - funkcja dodaje produkt do koszyka danego użytkownika (z OnlyAdvance ustawionym na 0).
+```SQL
+CREATE PROCEDURE AddToBasket
+    @UserID INT,
+    @ProductID INT
+AS
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM Users WHERE UserID = @UserID)
+    BEGIN
+        RAISERROR ('Użytkownik nie istnieje', 16, 1);
+        RETURN;
+    END;
+
+    IF NOT EXISTS (SELECT 1 FROM Products WHERE ProductID = @ProductID)
+    BEGIN
+        RAISERROR ('Produkt nie istnieje', 16, 1);
+        RETURN;
+    END;
+
+    if (select isactive from products where ProductID=@ProductID)=0
+	BEGIN
+        RAISERROR ('Produkt jest nieaktywny', 16, 1);
+        RETURN;
+    END;
+
+	if (select IsForSale from Products p join ProductTypes pt
+	on pt.ProductTypeID=p.ProductTypeID
+	where ProductID=@ProductID)=0
+	BEGIN
+        RAISERROR ('Produkt nie jest na sprzedaż', 16, 1);
+        RETURN;
+    END;
+
+    IF EXISTS (SELECT 1 FROM Basket WHERE UserID = @UserID AND ProductID = @ProductID)
+    BEGIN
+        RAISERROR ('Produkt już znajduje się w koszyku', 16, 1);
+        RETURN;
+    END;
+
+    INSERT INTO Basket (UserID, ProductID,OnlyAdvance)
+    VALUES (@UserID, @ProductID,0);
+
+END;
+```
+**PayOnlyAdvance** - ustawia OnlyAdvance na 1, jeżeli jest możliwość zapłaty samej zaliczki dla podanego produktu.
+```SQL
+create procedure PayOnlyAdvance
+	@UserID int,
+	@ProdID int
+as
+begin
+if not exists (select 1 from Basket
+where @UserID=UserID
+and @ProdID=ProductID)
+begin
+	raiserror ('Podany użytkownik nie posiada tego produktu w koszyku',16,1)
+	return;
+end;
+if (select entryfee from Products p
+where p.ProductID=@ProdID) is null
+begin
+	raiserror ('Płatność ratalna nie jest możliwa',16,1)
+	return;
+end;
+update Basket
+set OnlyAdvance = 1
+where ProductID=@ProdID
+and UserID=@UserID;
+end;
+```
+**PayFullPrice** - zmienia OnlyAdvance na 0
+```SQL
+create procedure PayFullPrice
+	@UserID int,
+	@ProdID int
+as
+begin
+if not exists (select 1 from Basket
+where @UserID=UserID
+and @ProdID=ProductID)
+begin
+	raiserror ('Podany użytkownik nie posiada tego produktu w koszyku',16,1)
+	return;
+end;
+
+update Basket
+set OnlyAdvance = 0
+where ProductID=@ProdID
+and UserID=@UserID;
+end;
+```
+**DeleteFromBasket** - usuwa wybrany produkt z koszyka użytkownika
+```SQL
+create procedure DeleteFromBasket
+	@UserID int,
+	@ProdID int
+as
+begin
+if not exists (select 1 from Basket
+where @UserID=UserID
+and @ProdID=ProductID)
+begin
+	raiserror ('Podany użytkownik nie posiada tego produktu w koszyku',16,1)
+	return;
+end;
+
+delete from Basket
+where ProductID=@ProdID
+and UserID=@UserID;
+end;
+```
+**BuyNow** - przenosi produkty danego użytkownika z koszyka do subskrypcji z AccessAllowed ustawionym na 0.
+```SQL 
+CREATE procedure [dbo].[BuyNow]
+	@UserID int
+as
+begin
+if not exists (select 1 from Basket
+where @UserID=UserID)
+begin
+	raiserror ('Podany użytkownik nie posiada produktów w koszyku',16,1)
+	return;
+end;
+insert into Subscriptions(UserID,ProductID,AccessAllowed)
+select @UserID, p.ProductID, 0
+from Products p,
+Basket b
+where p.ProductID in (select * from GetProductsByID(b.ProductID)) and b.UserID=@UserID;
+
+delete from Basket
+where UserID=@UserID;
+end;
+```
+
+**GetFinalProductID** - po podaniu id produktu rekurencyjnie szuka najstarszego przodka (produkt którego supreID jest NULL)
+``` SQL
+ALTER    FUNCTION [dbo].[GetFinalProductID]
+(
+	@prodID int
+)
+RETURNS int
+AS
+BEGIN
+
+	DECLARE @result int, @temp int
+
+	SELECT @result = @prodID
+	
+	SELECT @temp = p.SuperID
+	FROM Products p
+	WHERE p.ProductID = @result
+
+	WHILE @temp is not NULL
+	BEGIN
+		set @result = @temp
+
+		SELECT @temp = p.SuperID
+		FROM Products p
+		WHERE p.ProductID = @result
+	END
+
+	RETURN @result
+END
+``` 
+## Triggery
+
+**validateMeetingProduct** - uniemożliwia wpisanie spotkania przypisanego do produktu, który nie należy do produktu z tabeli EduComponents dla danego ComponentID.
+Przykładowo, można wpisać spotkanie w ramach kursu, tylko jeżeli komponent również należy do tego kursu.
+W przypadku studiów produkt może być zjazdem, a komponent może należeć do semestru, w ramach którego odbywa się ten zjazd.
+```SQL
+ALTER TRIGGER [dbo].[validateMeetingProduct]
+ON [dbo].[Meetings]
+AFTER INSERT, UPDATE
+AS
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+		join Products p on p.ProductID=i.ProductID
+		join EduComponents ec on ec.ComponentID=i.ComponentID
+		where i.ComponentID is not null
+		and (p.ProductID!=ec.ProductID and p.SuperID is not null and p.SuperID!=ec.ProductID)
+		or (p.SuperID is null and p.ProductID!=ec.ProductID)
+    )
+    BEGIN
+        RAISERROR ('ProductID w tabeli Meetings nie należy do ProductID z EduComponents dla danego ComponentID', 16, 1);
+        ROLLBACK TRANSACTION;
+    END
+END;
+
+```
+**only_translators** - uniemożliwia wpisania jako tłumacza użytkownika, który nie pełni tej roli w systemie
+```SQL
+create trigger only_translators
+on dbo.Translations
+after insert, update
+as
+begin
+	if not exists 
+	(select 1 from vTranslators t
+	join inserted i
+	on i.TranslatorID=t.UserID)
+	BEGIN
+        RAISERROR ('Podany użytkownik nie jest translatorem', 16, 2);
+        ROLLBACK TRANSACTION;
+    END
+end
+```
+**check_teacher** - uniemożliwia wpisania jako nauczyciela użytkownika, który nie pełni tej roli w systemie. Sprawdza czy podany nauczyciel nie prowadzi w tym czasie innego spotkania. (wyjątek - studia i spotkanie studyjne)
+```SQL
+ALTER trigger [dbo].[check_teacher]
+on [dbo].[Meetings]
+after insert, update
+as
+begin
+	if not exists 
+	(select 1 from vTeachers t
+	join inserted i
+	on i.TeacherID=t.UserID)
+	BEGIN
+        RAISERROR ('Podany użytkownik nie jest nauczycielem', 16, 3);
+        ROLLBACK TRANSACTION;
+    END
+	if exists
+	(select 1 from Meetings m
+	join inserted i
+	on i.TeacherID=m.TeacherID
+	where ((i.StartDate<m.EndDate and i.StartDate>m.StartDate) or (m.StartDate<i.EndDate and m.StartDate>i.StartDate))
+	and ((select dbo.GetProductTypeName(i.productid))!='spotkanie studyjne' or (select dbo.GetProductTypeName(m.productid))!='zjazd'))
+		BEGIN
+        RAISERROR ('Podany nauczyciel prowadzi w tym czasie inne spotkanie', 16, 4);
+        ROLLBACK TRANSACTION;
+    END
+	
+end
+```
+
+**accesAllowed** - Po zmianie pola AccessAllowed na 1, tworzy rekordy w tabeli Attendance, aby umożliwić uczestnictwo i rejestrowanie obecności na spotkaniach w ramach danej subskrypcji. 
+``` SQL
 ALTER TRIGGER [dbo].[access_allowed] 
    ON  [dbo].[Subscriptions]
    AFTER  UPDATE 
@@ -655,20 +987,17 @@ BEGIN
 	insert into Attendance (MeetingId, SubID)
 	(select m.MeetingID, SubID
 	from Products p 
-	join MeetingsAssignments ma
-	on p.ProductID = ma.ProductID
 	join Meetings m
-	on m.MeetingID=ma.MeetingID
+	on p.ProductID=m.ProductID
 	join inserted i
 	on i.ProductID=p.ProductID
 	and not exists(select 1 from Attendance a where (a.SubID=i.SubID and a.MeetingID=m.MeetingID)) 
 	) 
-
 END
 
 ```
 
-checkPass - po każdym wprowadzeniu obecności dla studiów sprawdzany jest stan zaliczenia
+<!-- **checkPass** - po każdym wprowadzeniu obecności dla studiów sprawdzany jest stan zaliczenia
 ``` SQL
 SET ANSI_NULLS ON
 GO
@@ -733,21 +1062,21 @@ declare
 
 end
 END
-```
+``` --> 
 
-paymentcheck - po opłaceniu zamówienia przyznawany jest dostęp do danej subskrybcji
+**paymentcheck** - po opłaceniu zamówienia przyznawany jest dostęp do danej subskrybcji
 ``` SQL
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-
-CREATE or ALTER TRIGGER [dbo].[paymentcheck]
+ALTER   TRIGGER [dbo].[paymentcheck]
    ON  [dbo].[Payments]
-   AFTER INSERT,DELETE,UPDATE
+   AFTER UPDATE
 AS 
+IF (UPDATE (IsPaid) and (select IsPaid from inserted)=1 and (select ispaid from deleted)=0)
 BEGIN
-
+	SET NOCOUNT ON
 	update Subscriptions set AccessAllowed = 1
 	where SubID = (select pd.SubID from 
 	                  PaymentDetails pd, 
@@ -756,6 +1085,188 @@ BEGIN
 					
 	
 	SET NOCOUNT ON;
+
+END
+```
+
+**CheckIfEnrolled** - uniemożliwia wprowadzeniu obecności osobie nie zapisanej na produkt do którego należy dane spotkanie
+``` SQL
+CREATE TRIGGER CheckIfEnrolled
+ON Attendance
+AFTER INSERT
+AS
+BEGIN
+    IF (
+		SELECT s.ProductID
+		FROM inserted i
+		join Subscriptions s on i.SubID = s.SubID
+	) != (
+		SELECT dbo.GetFinalProductID(p.ProductID)
+		FROM inserted i
+		join Meetings m on m.MeetingID = i.MeetingID
+		join Products p on p.ProductID = m.ProductID)
+    BEGIN
+        RAISERROR('User NOT enrolled for meeting', 16, 1);
+        ROLLBACK;
+    END
+END;
+```
+
+## Procedury
+
+**getMeetingAttendance** - zwraca tablicę obecności dla danego spotkania
+```SQL
+ALTER   PROCEDURE [dbo].[getMeetingAttendance] 
+	@thisMeetingID INT
+AS
+BEGIN
+
+	SET NOCOUNT ON;
+	SELECT CONCAT(u.FirstName, ' ', u.LastName) as Name, a.Presence
+	FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+	join Users u on u.UserID = s.UserID
+	where a.MeetingID = @thisMeetingID
+
+	SELECT avg(CAST(a.Presence as float)) as Attendance, a.MeetingID
+	FROM Attendance a
+	where a.MeetingID = @thisMeetingID
+	group by a.MeetingID
+END
+```
+**getStudiesSyllabus** - zwraca syllabus studiów
+```SQL
+ALTER   PROCEDURE [dbo].[getStudiesSyllabus]
+    @studyName NVARCHAR(MAX)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT 
+        ec.Name, ec.Description, p.ProductName
+    FROM Products p
+    JOIN Products sp ON p.SuperID = sp.ProductID
+	JOIN EduComponents ec on p.ProductID = ec.ProductID
+	JOIN ProductTypes pt on sp.ProductTypeID = pt.ProductTypeID
+	WHERE sp.ProductName = @studyName and pt.ProductTypeName = 'Studia'
+	ORDER BY p.ProductName, ec.Name
+	
+END
+```
+**getSyllabusSemester** - zwraca syllabus dla danego semestru
+```SQL
+ALTER PROCEDURE [dbo].[getSyllabusSemester](
+	@semesterName nvarchar(MAX) = ''
+)
+AS
+BEGIN
+	-- SET NOCOUNT ON added to prevent extra result sets from
+	-- interfering with SELECT statements.
+	SET NOCOUNT ON;
+
+    -- Insert statements for procedure here
+	SELECT ec.Name as Name, ec.Description as Description
+	FROM EduComponents ec join Products p on ec.ProductID = p.ProductID
+	join ProductTypes pt on p.ProductTypeID = pt.ProductTypeID
+	where pt.ProductTypeName = 'Semestr' and p.ProductName = @semesterName
+END
+```
+**getTotalUserAttendance** - zwraca całą zapisaną obecność dla danego użytkownika
+```SQL
+ALTER   PROCEDURE [dbo].[getTotalUserAttendance]
+	-- Add the parameters for the stored procedure here
+	@userName nvarchar(MAX)
+AS
+BEGIN
+	-- SET NOCOUNT ON added to prevent extra result sets from
+	-- interfering with SELECT statements.
+	SET NOCOUNT ON;
+
+    -- Insert statements for procedure here
+	SELECT ec.Name, m.MeetingID, a.Presence, CAST(a.Presence AS INT) as IntCast
+	FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+	join Users u on u.UserID = s.UserID
+	join Meetings m on m.MeetingID = a.MeetingID
+	join EduComponents ec on ec.ComponentID = m.ComponentID
+	WHERE CONCAT(u.FirstName, ' ', u.LastName) = @userName
+
+	SELECT avg(CAST(a.Presence AS float)) AS Frequency 
+	FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+	join Users u on u.UserID = s.UserID
+	WHERE CONCAT(u.FirstName, ' ', u.LastName) = @userName
+END
+```
+**getUserComponentAttendance** - obecność danego użytkownika na danym przedmiocie
+```SQL
+ALTER   PROCEDURE [dbo].[getUserComponentAttendance]
+	-- Add the parameters for the stored procedure here
+	@userName nvarchar(MAX),
+	@componentName nvarchar(MAX)
+AS
+BEGIN
+	-- SET NOCOUNT ON added to prevent extra result sets from
+	-- interfering with SELECT statements.
+	SET NOCOUNT ON;
+
+    -- Insert statements for procedure here
+	SELECT m.MeetingID, m.StartDate, a.Presence
+	FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+	join Users u on s.UserID = u.UserID
+	join Meetings m on m.MeetingID = a.MeetingID
+	join EduComponents ec on ec.ComponentID = m.ComponentID
+	WHERE CONCAT(u.FirstName,' ',u.LastName) = @userName and ec.Name = @componentName
+	ORDER BY m.StartDate
+
+	SELECT avg(CAST(a.Presence as float)) as Frequency
+	FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+	join Users u on s.UserID = u.UserID
+	join Meetings m on m.MeetingID = a.MeetingID
+	join EduComponents ec on ec.ComponentID = m.ComponentID
+	WHERE CONCAT(u.FirstName,' ',u.LastName) = @userName and ec.Name = @componentName
+
+END
+```
+
+**getUserSubjectGrades** - zwraca oceny danego użytkownika z danego przedmiotu wraz z detalami
+```SQL
+ALTER   PROCEDURE [dbo].[getUserSubjectGrades]
+	-- Add the parameters for the stored procedure here
+	@userName nvarchar(MAX),
+	@subjectName nvarchar(MAX)
+
+AS
+BEGIN
+	-- SET NOCOUNT ON added to prevent extra result sets from
+	-- interfering with SELECT statements.
+	SET NOCOUNT ON;
+
+    -- Insert statements for procedure here
+	SELECT CAST(m.StartDate as date) as 'Date', a.Grade as 'Grade', m.MeetingType as 'Type'
+	FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+	join Users u on u.UserID = s.UserID
+	join Meetings m on m.MeetingID = a.MeetingID
+	join EduComponents ec on ec.ComponentID = m.ComponentID
+	WHERE CONCAT(u.FirstName, ' ', u.LastName) = @userName and a.Grade is not NULL and
+		ec.Name = @subjectName
+	ORDER BY m.StartDate
+END
+```
+**getAllUserGrades** - zwraca wszystkie oceny użytkownika
+```SQL
+ALTER   PROCEDURE [dbo].[getAllUserGrades]
+
+	@userName nvarchar(MAX)
+AS
+BEGIN
+	SET NOCOUNT ON;
+
+
+	SELECT ec.Name as Subject, STRING_AGG(CAST(a.GRADE AS nvarchar), '; ') AS GradeList, CAST(avg(a.Grade)as decimal(10,2)) as Average
+	FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+	join Users u on u.UserID = s.UserID
+	join Meetings m on m.MeetingID = a.MeetingID
+	join EduComponents ec on ec.ComponentID = m.ComponentID
+	WHERE CONCAT(u.FirstName, ' ', u.LastName) = @userName and a.Grade is not NULL
+	GROUP BY ec.Name
 
 END
 ```
