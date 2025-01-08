@@ -872,7 +872,38 @@ where UserID=@UserID;
 end;
 ```
 
+**GetFinalProductID** - po podaniu id produktu rekurencyjnie szuka najstarszego przodka (produkt którego supreID jest NULL)
+``` SQL
+ALTER    FUNCTION [dbo].[GetFinalProductID]
+(
+	@prodID int
+)
+RETURNS int
+AS
+BEGIN
+
+	DECLARE @result int, @temp int
+
+	SELECT @result = @prodID
+	
+	SELECT @temp = p.SuperID
+	FROM Products p
+	WHERE p.ProductID = @result
+
+	WHILE @temp is not NULL
+	BEGIN
+		set @result = @temp
+
+		SELECT @temp = p.SuperID
+		FROM Products p
+		WHERE p.ProductID = @result
+	END
+
+	RETURN @result
+END
+``` 
 ## Triggery
+
 
 **validateMeetingProduct** - uniemożliwia wpisanie spotkania przypisanego do produktu, który nie należy do produktu z tabeli EduComponents dla danego ComponentID.
 Przykładowo, można wpisać spotkanie w ramach kursu, tylko jeżeli komponent również należy do tego kursu.
@@ -968,6 +999,7 @@ END
 ```
 
 **checkPass** - po każdym wprowadzeniu obecności dla studiów sprawdzany jest stan zaliczenia
+
 ``` SQL
 SET ANSI_NULLS ON
 GO
@@ -1032,7 +1064,7 @@ declare
 
 end
 END
-```
+``` --> 
 
 **paymentcheck** - po opłaceniu zamówienia przyznawany jest dostęp do danej subskrybcji
 ``` SQL
@@ -1055,6 +1087,188 @@ BEGIN
 					
 	
 	SET NOCOUNT ON;
+
+END
+```
+
+**CheckIfEnrolled** - uniemożliwia wprowadzeniu obecności osobie nie zapisanej na produkt do którego należy dane spotkanie
+``` SQL
+CREATE TRIGGER CheckIfEnrolled
+ON Attendance
+AFTER INSERT
+AS
+BEGIN
+    IF (
+		SELECT s.ProductID
+		FROM inserted i
+		join Subscriptions s on i.SubID = s.SubID
+	) != (
+		SELECT dbo.GetFinalProductID(p.ProductID)
+		FROM inserted i
+		join Meetings m on m.MeetingID = i.MeetingID
+		join Products p on p.ProductID = m.ProductID)
+    BEGIN
+        RAISERROR('User NOT enrolled for meeting', 16, 1);
+        ROLLBACK;
+    END
+END;
+```
+
+## Procedury
+
+**getMeetingAttendance** - zwraca tablicę obecności dla danego spotkania
+```SQL
+ALTER   PROCEDURE [dbo].[getMeetingAttendance] 
+	@thisMeetingID INT
+AS
+BEGIN
+
+	SET NOCOUNT ON;
+	SELECT CONCAT(u.FirstName, ' ', u.LastName) as Name, a.Presence
+	FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+	join Users u on u.UserID = s.UserID
+	where a.MeetingID = @thisMeetingID
+
+	SELECT avg(CAST(a.Presence as float)) as Attendance, a.MeetingID
+	FROM Attendance a
+	where a.MeetingID = @thisMeetingID
+	group by a.MeetingID
+END
+```
+**getStudiesSyllabus** - zwraca syllabus studiów
+```SQL
+ALTER   PROCEDURE [dbo].[getStudiesSyllabus]
+    @studyName NVARCHAR(MAX)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT 
+        ec.Name, ec.Description, p.ProductName
+    FROM Products p
+    JOIN Products sp ON p.SuperID = sp.ProductID
+	JOIN EduComponents ec on p.ProductID = ec.ProductID
+	JOIN ProductTypes pt on sp.ProductTypeID = pt.ProductTypeID
+	WHERE sp.ProductName = @studyName and pt.ProductTypeName = 'Studia'
+	ORDER BY p.ProductName, ec.Name
+	
+END
+```
+**getSyllabusSemester** - zwraca syllabus dla danego semestru
+```SQL
+ALTER PROCEDURE [dbo].[getSyllabusSemester](
+	@semesterName nvarchar(MAX) = ''
+)
+AS
+BEGIN
+	-- SET NOCOUNT ON added to prevent extra result sets from
+	-- interfering with SELECT statements.
+	SET NOCOUNT ON;
+
+    -- Insert statements for procedure here
+	SELECT ec.Name as Name, ec.Description as Description
+	FROM EduComponents ec join Products p on ec.ProductID = p.ProductID
+	join ProductTypes pt on p.ProductTypeID = pt.ProductTypeID
+	where pt.ProductTypeName = 'Semestr' and p.ProductName = @semesterName
+END
+```
+**getTotalUserAttendance** - zwraca całą zapisaną obecność dla danego użytkownika
+```SQL
+ALTER   PROCEDURE [dbo].[getTotalUserAttendance]
+	-- Add the parameters for the stored procedure here
+	@userName nvarchar(MAX)
+AS
+BEGIN
+	-- SET NOCOUNT ON added to prevent extra result sets from
+	-- interfering with SELECT statements.
+	SET NOCOUNT ON;
+
+    -- Insert statements for procedure here
+	SELECT ec.Name, m.MeetingID, a.Presence, CAST(a.Presence AS INT) as IntCast
+	FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+	join Users u on u.UserID = s.UserID
+	join Meetings m on m.MeetingID = a.MeetingID
+	join EduComponents ec on ec.ComponentID = m.ComponentID
+	WHERE CONCAT(u.FirstName, ' ', u.LastName) = @userName
+
+	SELECT avg(CAST(a.Presence AS float)) AS Frequency 
+	FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+	join Users u on u.UserID = s.UserID
+	WHERE CONCAT(u.FirstName, ' ', u.LastName) = @userName
+END
+```
+**getUserComponentAttendance** - obecność danego użytkownika na danym przedmiocie
+```SQL
+ALTER   PROCEDURE [dbo].[getUserComponentAttendance]
+	-- Add the parameters for the stored procedure here
+	@userName nvarchar(MAX),
+	@componentName nvarchar(MAX)
+AS
+BEGIN
+	-- SET NOCOUNT ON added to prevent extra result sets from
+	-- interfering with SELECT statements.
+	SET NOCOUNT ON;
+
+    -- Insert statements for procedure here
+	SELECT m.MeetingID, m.StartDate, a.Presence
+	FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+	join Users u on s.UserID = u.UserID
+	join Meetings m on m.MeetingID = a.MeetingID
+	join EduComponents ec on ec.ComponentID = m.ComponentID
+	WHERE CONCAT(u.FirstName,' ',u.LastName) = @userName and ec.Name = @componentName
+	ORDER BY m.StartDate
+
+	SELECT avg(CAST(a.Presence as float)) as Frequency
+	FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+	join Users u on s.UserID = u.UserID
+	join Meetings m on m.MeetingID = a.MeetingID
+	join EduComponents ec on ec.ComponentID = m.ComponentID
+	WHERE CONCAT(u.FirstName,' ',u.LastName) = @userName and ec.Name = @componentName
+
+END
+```
+
+**getUserSubjectGrades** - zwraca oceny danego użytkownika z danego przedmiotu wraz z detalami
+```SQL
+ALTER   PROCEDURE [dbo].[getUserSubjectGrades]
+	-- Add the parameters for the stored procedure here
+	@userName nvarchar(MAX),
+	@subjectName nvarchar(MAX)
+
+AS
+BEGIN
+	-- SET NOCOUNT ON added to prevent extra result sets from
+	-- interfering with SELECT statements.
+	SET NOCOUNT ON;
+
+    -- Insert statements for procedure here
+	SELECT CAST(m.StartDate as date) as 'Date', a.Grade as 'Grade', m.MeetingType as 'Type'
+	FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+	join Users u on u.UserID = s.UserID
+	join Meetings m on m.MeetingID = a.MeetingID
+	join EduComponents ec on ec.ComponentID = m.ComponentID
+	WHERE CONCAT(u.FirstName, ' ', u.LastName) = @userName and a.Grade is not NULL and
+		ec.Name = @subjectName
+	ORDER BY m.StartDate
+END
+```
+**getAllUserGrades** - zwraca wszystkie oceny użytkownika
+```SQL
+ALTER   PROCEDURE [dbo].[getAllUserGrades]
+
+	@userName nvarchar(MAX)
+AS
+BEGIN
+	SET NOCOUNT ON;
+
+
+	SELECT ec.Name as Subject, STRING_AGG(CAST(a.GRADE AS nvarchar), '; ') AS GradeList, CAST(avg(a.Grade)as decimal(10,2)) as Average
+	FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+	join Users u on u.UserID = s.UserID
+	join Meetings m on m.MeetingID = a.MeetingID
+	join EduComponents ec on ec.ComponentID = m.ComponentID
+	WHERE CONCAT(u.FirstName, ' ', u.LastName) = @userName and a.Grade is not NULL
+	GROUP BY ec.Name
 
 END
 ```
