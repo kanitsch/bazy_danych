@@ -420,7 +420,6 @@ CREATE TABLE Meetings (
     TeacherID int  NOT NULL,
     LinkToVideo nvarchar(100)  NULL,
     LanguageID int  NOT NULL,
-    MaxSeats int  NULL,
     CONSTRAINT Meetings_pk PRIMARY KEY  (MeetingID)
 );
 
@@ -740,16 +739,24 @@ END;
 ```
 **AddToBasket** - funkcja dodaje produkt do koszyka danego użytkownika (z OnlyAdvance ustawionym na 0).
 ```SQL
-CREATE PROCEDURE AddToBasket
+ALTER PROCEDURE [dbo].[AddToBasket]
     @UserID INT,
     @ProductID INT
 AS
 BEGIN
+    exec removeUnpaidSubscriptions
     IF NOT EXISTS (SELECT 1 FROM Users WHERE UserID = @UserID)
     BEGIN
         RAISERROR ('Użytkownik nie istnieje', 16, 1);
         RETURN;
     END;
+
+	if not exists (SELECT 1 from UserToRole where UserID=@UserID and RoleID=1)
+	begin
+	    RAISERROR ('Użytkownik nie jest klientem', 16, 1);
+        RETURN;
+    END;
+
 
     IF NOT EXISTS (SELECT 1 FROM Products WHERE ProductID = @ProductID)
     BEGIN
@@ -760,6 +767,12 @@ BEGIN
     if (select isactive from products where ProductID=@ProductID)=0
 	BEGIN
         RAISERROR ('Produkt jest nieaktywny', 16, 1);
+        RETURN;
+    END;
+
+	if dbo.FreeSeats(@ProductID)=0
+	BEGIN
+        RAISERROR ('Brak miejsc', 16, 1);
         RETURN;
     END;
 
@@ -781,6 +794,7 @@ BEGIN
     VALUES (@UserID, @ProductID,0);
 
 END;
+
 ```
 **PayOnlyAdvance** - ustawia OnlyAdvance na 1, jeżeli jest możliwość zapłaty samej zaliczki dla podanego produktu.
 ```SQL
@@ -849,27 +863,94 @@ where ProductID=@ProdID
 and UserID=@UserID;
 end;
 ```
-**BuyNow** - przenosi produkty danego użytkownika z koszyka do subskrypcji z AccessAllowed ustawionym na 0.
+**BuyNow** - przenosi produkty danego użytkownika z koszyka do subskrypcji z AccessAllowed ustawionym na 0
+(wyjątek - darmowe webinary - AccessAllowed jest wtedy ustawiony na 1).
 ```SQL 
-CREATE procedure [dbo].[BuyNow]
-	@UserID int
-as
-begin
-if not exists (select 1 from Basket
-where @UserID=UserID)
-begin
-	raiserror ('Podany użytkownik nie posiada produktów w koszyku',16,1)
-	return;
-end;
-insert into Subscriptions(UserID,ProductID,AccessAllowed)
-select @UserID, p.ProductID, 0
-from Products p,
-Basket b
-where p.ProductID in (select * from GetProductsByID(b.ProductID)) and b.UserID=@UserID;
+ALTER PROCEDURE [dbo].[BuyNow]
+    @UserID INT
+AS
+BEGIN
+    BEGIN TRANSACTION;
+    exec removeUnpaidSubscriptions
 
-delete from Basket
-where UserID=@UserID;
-end;
+    IF NOT EXISTS (
+        SELECT 1 FROM Basket WHERE UserID = @UserID
+    )
+    BEGIN
+        RAISERROR ('Podany użytkownik nie posiada produktów w koszyku', 16, 1);
+        RETURN;
+    END;
+
+    IF EXISTS (
+        SELECT 1 
+        FROM Subscriptions s
+        JOIN Basket b ON b.UserID = s.UserID
+        WHERE s.UserID = @UserID AND s.ProductID = b.ProductID
+    )
+    BEGIN
+        RAISERROR ('Podany użytkownik posiada już subskrypcję na produkt ...', 16, 1);
+        RETURN;
+    END;
+
+    IF EXISTS (
+        SELECT ProductID
+        FROM Basket b
+        WHERE UserID = @UserID AND dbo.FreeSeats(ProductID) = 0
+    )
+    BEGIN
+        RAISERROR ('Brak miejsc na produkt ...', 16, 1);
+        RETURN;
+    END;
+
+	-- 15 minut na zapłacenie
+    INSERT INTO Subscriptions (UserID, ProductID,AccessAllowed,PaymentDeadline)
+    SELECT distinct UserID, p.ProductID,0, DATEADD(mi,15,Getdate())
+    FROM Basket b
+	join Products p
+	on p.ProductID=b.ProductID
+	where UserID=@UserID and p.FullPrice is not null;
+
+    DECLARE @Subscriptions TABLE (SubID INT, ProductID INT);
+    INSERT INTO @Subscriptions (SubID, ProductID)
+    SELECT distinct s.SubID, s.ProductID
+    FROM Subscriptions s
+    JOIN Basket b ON b.ProductID = s.ProductID
+    WHERE s.UserID = @UserID AND b.UserID = @UserID;
+
+    if exists (select 1 from @Subscriptions)
+    begin
+
+    DECLARE @MainPaymentLink NVARCHAR(64);
+    SET @MainPaymentLink = CONCAT('https://payment.', NEWID(), '.pl');
+
+    INSERT INTO Payments (IsPaid, Link)
+    VALUES (0, @MainPaymentLink);
+    DECLARE @MainPaymentID INT = SCOPE_IDENTITY();
+
+    INSERT INTO PaymentDetails (PaymentID, SubID, Value)
+    SELECT distinct
+        @MainPaymentID, 
+        s.SubID, 
+        CASE 
+            WHEN b.OnlyAdvance = 0 THEN p.FullPrice
+            ELSE p.EntryFee
+        END AS Value
+    FROM @Subscriptions s
+    JOIN Products p ON s.ProductID = p.ProductID
+    JOIN Basket b ON b.ProductID = p.ProductID and b.UserID=@UserID
+    WHERE p.SuperID IS NULL;
+    end;
+
+    INSERT INTO Subscriptions (UserID, ProductID,AccessAllowed)
+    SELECT distinct UserID, p.ProductID,1
+    FROM Basket b
+	join Products p
+	on p.ProductID=b.ProductID and b.OnlyAdvance=0
+	where UserID=@UserID and p.FullPrice is null;
+
+DELETE FROM Basket WHERE UserID = @UserID;
+COMMIT TRANSACTION;
+END;
 ```
 
 **GetFinalProductID** - po podaniu id produktu rekurencyjnie szuka najstarszego przodka (produkt którego supreID jest NULL)
@@ -976,13 +1057,18 @@ begin
 end
 ```
 
-**accesAllowed** - Po zmianie pola AccessAllowed na 1, tworzy rekordy w tabeli Attendance, aby umożliwić uczestnictwo i rejestrowanie obecności na spotkaniach w ramach danej subskrypcji. 
+**accesAllowed** - Po ustawieniu pola AccessAllowed na 1, tworzy rekordy w tabeli Attendance, aby umożliwić uczestnictwo i rejestrowanie obecności na spotkaniach w ramach danej subskrypcji. 
 ``` SQL
 ALTER TRIGGER [dbo].[access_allowed] 
    ON  [dbo].[Subscriptions]
-   AFTER  UPDATE 
+   AFTER  UPDATE, insert
 AS 
-IF ( UPDATE (Accessallowed) and (select accessallowed from inserted)=1 and (select accessallowed from deleted)=0 )  
+if exists (
+    select 1 
+    from inserted i
+    left join deleted d on i.subid = d.subid
+    where i.accessallowed = 1 and (d.accessallowed is null or d.accessallowed = 0)
+)
 BEGIN
 	SET NOCOUNT ON
 	insert into Attendance (MeetingId, SubID)
@@ -991,10 +1077,12 @@ BEGIN
 	join Meetings m
 	on p.ProductID=m.ProductID
 	join inserted i
-	on i.ProductID=p.ProductID
+	on (i.ProductID=dbo.GetFinalProductID(p.ProductID) or i.ProductID=p.ProductID)
 	and not exists(select 1 from Attendance a where (a.SubID=i.SubID and a.MeetingID=m.MeetingID)) 
 	) 
+
 END
+
 
 ```
 
@@ -1064,54 +1152,173 @@ declare
 
 end
 END
-``` --> 
+``` 
 
-**paymentcheck** - po opłaceniu zamówienia przyznawany jest dostęp do danej subskrybcji
+**paymentcheck** - po opłaceniu pełnej kwoty zamówienia przyznawany jest dostęp do danej subskrypcji. Jeżeli zapłacono zaliczkę za studia, tworzone są osobne subskrypcje i płatności do poszczególnych zjazdów.
+Jeżeli zapłacono zaliczkę za kurs, tworzona jest nowa płatność do tej samej subskrypcji na pozostałą kwotę. Terminy wymaganej płatności są odpowiednio aktualizowane.
 ``` SQL
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
 ALTER   TRIGGER [dbo].[paymentcheck]
-   ON  [dbo].[Payments]
-   AFTER UPDATE
-AS 
-IF (UPDATE (IsPaid) and (select IsPaid from inserted)=1 and (select ispaid from deleted)=0)
+ON [dbo].[Payments]
+AFTER UPDATE
+AS
 BEGIN
-	SET NOCOUNT ON
-	update Subscriptions set AccessAllowed = 1
-	where SubID = (select pd.SubID from 
-	                  PaymentDetails pd, 
-					  inserted i
-					where i.PaymentID = pd.PaymentID)
-					
-	
-	SET NOCOUNT ON;
+    SET NOCOUNT ON;
+    IF EXISTS (
+        SELECT 1
+        FROM Inserted i
+        JOIN Deleted d ON i.PaymentID = d.PaymentID
+        WHERE i.IsPaid = 1 AND d.IsPaid = 0
+    )
+    BEGIN
+        DECLARE @SubID INT, @UserID INT, @ProductID INT, @ProductTypeName NVARCHAR(40), @EntryFee MONEY, @FullPrice MONEY, @Value Money;
 
-END
+        DECLARE cur CURSOR FOR
+        SELECT s.SubID, s.UserID, s.ProductID, (select dbo.GetProductTypeName(s.ProductID)), p.EntryFee, p.FullPrice,pd.Value
+        FROM Inserted i
+		join PaymentDetails pd
+		on pd.PaymentID=i.PaymentID
+        JOIN Subscriptions s ON pd.SubID = s.SubID
+        JOIN Products p ON s.ProductID = p.ProductID
+        WHERE i.IsPaid = 1;
+
+        OPEN cur;
+        FETCH NEXT FROM cur INTO @SubID, @UserID, @ProductID, @ProductTypeName, @EntryFee, @FullPrice,@Value;
+
+        WHILE @@FETCH_STATUS = 0
+        BEGIN
+            IF @Value=@FullPrice or @Value=@FullPrice-@EntryFee
+            BEGIN
+                UPDATE Subscriptions
+                SET AccessAllowed = 1
+                WHERE SubID = @SubID;
+            END
+            ELSE
+            BEGIN
+                IF @ProductTypeName = 'studia'
+                BEGIN
+                    INSERT INTO Subscriptions (UserID, ProductID,AccessAllowed,PaymentDeadline)
+                    SELECT distinct @UserID, p.ProductID,0, DATEADD(dd,-3,dbo.FindStartDate(p.ProductID))
+                    FROM Products p
+                    where dbo.GetFinalProductID(p.ProductID)=@ProductID and p.ProductID!=@ProductID and p.FullPrice is not null
+                    
+                    DECLARE @Subscriptions TABLE (SubID INT, ProductID INT);
+                    INSERT INTO @Subscriptions (SubID, ProductID)
+                    SELECT distinct s.SubID, s.ProductID
+                    FROM Subscriptions s
+                    where dbo.GetFinalProductID(s.ProductID)=@ProductID and s.ProductID!=@ProductID and UserID=@UserID
+                    
+                    DECLARE @NewSubID INT, @NewProductID INT;
+                    DECLARE sub_cursor CURSOR FOR 
+                    SELECT SubID, ProductID FROM @Subscriptions;
+
+                    OPEN sub_cursor;
+                    FETCH NEXT FROM sub_cursor INTO @NewSubID, @NewProductID;
+
+                    WHILE @@FETCH_STATUS = 0
+                    BEGIN
+                        DECLARE @PaymentLink NVARCHAR(64);
+                        SET @PaymentLink = CONCAT('https://payment.', NEWID(), '.pl');
+
+                        INSERT INTO Payments (IsPaid, Link)
+                        VALUES (0, @PaymentLink);
+                        DECLARE @PaymentID INT = SCOPE_IDENTITY();
+
+                        INSERT INTO PaymentDetails (PaymentID, SubID, Value)
+                        VALUES (@PaymentID, @NewSubID, 
+                                (SELECT FullPrice FROM Products WHERE ProductID = @NewProductID));
+
+                        FETCH NEXT FROM sub_cursor INTO @NewSubID, @NewProductID;
+                    END;
+
+                    CLOSE sub_cursor;
+                    DEALLOCATE sub_cursor;
+
+		UPDATE Subscriptions
+                SET PaymentDeadline=Null
+                WHERE SubID = @SubID;
+		END
+
+            ELSE IF @ProductTypeName = 'kurs'
+            BEGIN
+            DECLARE @PaymentLink2 NVARCHAR(64);
+	    SET @PaymentLink2 = CONCAT('https://payment.', NEWID(), '.pl');
+	    INSERT INTO Payments (IsPaid, Link)
+		    VALUES (0, @PaymentLink2);
+		DECLARE @PaymentID2 INT = SCOPE_IDENTITY();
+
+		insert into PaymentDetails (PaymentID,SubID,Value)
+	        Values(@PaymentID2,@SubID,@FullPrice-@EntryFee);
+
+	        update Subscriptions
+	    	set PaymentDeadline=DATEADD(dd,-3,dbo.FindStartDate(@ProductID))
+			where SubID=@SubID
+                END
+            END
+
+            FETCH NEXT FROM cur INTO @SubID, @UserID, @ProductID, @ProductTypeName, @EntryFee, @FullPrice,@Value;
+        END;
+
+        CLOSE cur;
+        DEALLOCATE cur;
+    END
+END;
 ```
 
 **CheckIfEnrolled** - uniemożliwia wprowadzeniu obecności osobie nie zapisanej na produkt do którego należy dane spotkanie
 ``` SQL
-CREATE TRIGGER CheckIfEnrolled
-ON Attendance
+ALTER TRIGGER [dbo].[CheckIfEnrolled]
+ON [dbo].[Attendance]
 AFTER INSERT
 AS
 BEGIN
-    IF (
-		SELECT s.ProductID
-		FROM inserted i
-		join Subscriptions s on i.SubID = s.SubID
-	) != (
-		SELECT dbo.GetFinalProductID(p.ProductID)
-		FROM inserted i
-		join Meetings m on m.MeetingID = i.MeetingID
-		join Products p on p.ProductID = m.ProductID)
+    SET NOCOUNT ON;
+
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+        JOIN Subscriptions s ON i.SubID = s.SubID
+        JOIN Meetings m ON m.MeetingID = i.MeetingID
+        JOIN Products p ON p.ProductID = m.ProductID
+        WHERE dbo.GetFinalProductID(s.ProductID) != dbo.GetFinalProductID(p.ProductID)
+    )
     BEGIN
         RAISERROR('User NOT enrolled for meeting', 16, 1);
         ROLLBACK;
     END
 END;
+GO
+```
+**checkUsersRole** - sprawdza czy użytkownik wpisywany do tabeli Subscriptions jest klientem. W przeciwnym razie rzuca błąd i cofa transakcję.
+```SQL
+create trigger checkUsersRole
+on subscriptions
+after insert
+as
+begin
+if exists 
+	(select 1 from UserToRole utr 
+	join inserted i on i.UserID=utr.UserID 
+	where RoleID=1)
+	begin;
+	    THROW 50002, 'Użytkownik nie jest klientem', 1;
+        ROLLBACK TRANSACTION;
+    END;
+end
+```
+**checkComponentsProduct** - nie pozwala dodać do tabeli EduComponents komponentu należącego do innych produktów niż semstr lub kurs.
+```SQL
+create trigger checkComponentsProduct
+on EduComponents
+after insert, update
+as
+begin
+if exists (select 1 from inserted i where
+dbo.GetProductTypeName(i.productID) in ('studia', 'zjazd', 'webinar','spotkanie studyjne'))
+begin
+	    THROW 50000, 'Komponent nie może należeć do tego produktu', 1;
+        ROLLBACK TRANSACTION;
+end
+end
 ```
 
 ## Procedury
@@ -1269,6 +1476,204 @@ BEGIN
 	join EduComponents ec on ec.ComponentID = m.ComponentID
 	WHERE CONCAT(u.FirstName, ' ', u.LastName) = @userName and a.Grade is not NULL
 	GROUP BY ec.Name
+
+END
+```
+**removeUnpaidSubscriptions** - usuwa subskrypcje, które nie mają przyznanego dostępu, a upłynął termin płatności (usuwa również dane tych płatności).
+```SQL
+ALTER procedure [dbo].[removeUnpaidSubscriptions]
+as
+begin
+	delete from PaymentDetails
+	where SubID in (select SubID
+	from Subscriptions 
+	where AccessAllowed=0
+	and GETDATE()>PaymentDeadline)
+
+	delete from Subscriptions
+	where AccessAllowed=0
+	and GETDATE()>PaymentDeadline
+
+	delete from Payments
+	where not exists 
+	(select 1 from PaymentDetails pd
+	where pd.PaymentID=paymentid)
+end;
+```
+**setDeferredPaymentConsent** - procedura dla dyrektora, do ustawiania zgody na płatność odroczoną dla podanej subskrypcji i wyznaczenia daty wymaganej płatności.
+
+```SQL
+CREATE PROCEDURE setDeferredPaymentConsent
+    @SubID INT,
+    @PaymentDate DATETIME
+AS
+BEGIN
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        UPDATE Subscriptions
+        SET AccessAllowed = 1, 
+            PaymentDeadline = @PaymentDate
+        WHERE SubID = @SubID;
+
+        IF @@ROWCOUNT = 0
+        BEGIN
+            THROW 50001, 'Subskrypcja o podanym SubID nie została znaleziona.', 1;
+        END
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END;
+```
+**registerClient** - procedura rejestrująca nowego użytkownika i przyznająca mu rolę klienta
+```SQL
+CREATE PROCEDURE registerClient
+    @FirstName NVARCHAR(20),
+    @LastName NVARCHAR(20),
+    @Email NVARCHAR(40),
+    @Address NVARCHAR(100),
+    @Password NVARCHAR(20)
+AS
+BEGIN
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        INSERT INTO Users (FirstName, LastName, Email, Address, Password)
+        VALUES (@FirstName, @LastName, @Email, @Address, @Password);
+        DECLARE @UserID INT = SCOPE_IDENTITY();
+
+        INSERT INTO UserToRole (UserID, RoleID)
+        VALUES (@UserID, (SELECT RoleID FROM Roles WHERE RoleName = 'Klient'));
+
+        COMMIT TRANSACTION;
+    END TRY
+
+    BEGIN CATCH
+        ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END;
+```
+**registerUser** - rejestracja użytkownika bez podania roli i adresu (adres jest wymagany tylko dla klientów) - funkcja administratora
+```SQL
+CREATE PROCEDURE registerUser
+    @FirstName NVARCHAR(20),
+    @LastName NVARCHAR(20),
+    @Email NVARCHAR(40),
+    @Password NVARCHAR(20)
+AS
+BEGIN
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        INSERT INTO Users (FirstName, LastName, Email, Password)
+        VALUES (@FirstName, @LastName, @Email, @Password);
+
+        COMMIT TRANSACTION;
+    END TRY
+
+    BEGIN CATCH
+        ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END;
+```
+**AssignRole** - przypisuje rolę podanemu użytkownikowi. Rolę klient można przypisać tylko, jeżeli użytkownik podał adres.
+```SQL
+ALTER PROCEDURE AssignRole
+    @UserID INT,
+    @RoleID INT
+AS
+BEGIN
+    BEGIN TRY
+	
+        IF EXISTS (SELECT 1 FROM Users WHERE UserID = @UserID)
+        BEGIN
+			if (@RoleID=1 and (select Address from Users where UserID=@UserID) is null)
+			begin
+				throw 52000, 'Najpierw należy uzupełnić adres dla podanego użytkownika.', 1;
+			end
+			else
+            IF EXISTS (SELECT 1 FROM Roles WHERE RoleID = @RoleID)
+            BEGIN
+                INSERT INTO UserToRole (UserID, RoleID)
+                VALUES (@UserID, @RoleID);
+            END
+            ELSE
+            BEGIN
+                THROW 52000, 'Nie ma roli o podanym ID', 1;
+            END
+        END
+        ELSE
+        BEGIN
+            THROW 52000, 'Użytkownik o podanym ID nie istnieje',1;
+        END
+    END TRY
+    BEGIN CATCH
+		DECLARE @msg nvarchar(2048)= ERROR_MESSAGE();
+        THROW 52000, @msg, 1;
+    END CATCH
+END;
+```
+**addAddress** - aktualizuje adres podanego użytkownika.
+```SQL
+alter PROCEDURE addAddress
+    @UserID INT,
+    @Address NVARCHAR(100)
+AS
+BEGIN
+    BEGIN TRY
+        UPDATE Users
+        SET Address = @Address
+        WHERE UserID = @UserID;
+
+        IF @@ROWCOUNT = 0
+        BEGIN
+            THROW 50000, 'No user found with the specified UserID.', 1;
+        END
+    END TRY
+    BEGIN CATCH
+        DECLARE @msg nvarchar(2048)= ERROR_MESSAGE();
+        THROW 50000, @msg, 1;
+    END CATCH
+END;
+```
+**RemoveUsersRole** - odbiera użytkownikowi rolę.
+```SQL
+CREATE PROCEDURE [dbo].[RemoveUsersRole]
+    @UserID INT,
+    @RoleID INT
+AS
+BEGIN
+
+    BEGIN TRY
+        IF NOT EXISTS (SELECT 1 FROM Users WHERE UserID = @UserID)
+        BEGIN;
+            THROW 52000, N'Użytkownik o podanym UserID nie istnieje.', 1;
+        END
+
+        IF NOT EXISTS (SELECT 1 FROM Roles WHERE RoleID = @RoleID)
+        BEGIN;
+            THROW 52000, N'Rola o podanym RoleID nie istnieje.', 1
+        END
+
+        IF NOT EXISTS (SELECT 1 FROM UserToRole WHERE UserID = @UserID AND RoleID = @RoleID)
+        BEGIN;
+            THROW 52000, N'Rola nie jest przypisana do tego użytkownika.', 1;
+        END;
+
+        DELETE FROM UserToRole
+        WHERE UserID = @UserID AND RoleID = @RoleID
+
+    END TRY
+    BEGIN CATCH
+        DECLARE @ErrorMessage NVARCHAR(4000) = ERROR_MESSAGE();
+        THROW 52000, @ErrorMessage, 1
+    END CATCH
 
 END
 ```
