@@ -607,6 +607,45 @@ on utr.UserID=u.UserID
 join Roles r
 on r.RoleID=utr.RoleID
 ```
+**BilocationReport** -  lista osób, które są zapisane na co najmniej dwa przyszłe szkolenia, 
+które ze sobą kolidują czasowo.
+```SQL
+CREATE VIEW BilocationReport
+AS
+SELECT u.*
+FROM Users u
+WHERE EXISTS (
+    SELECT 1
+    FROM dbo.StudentsBilocation(u.UserID)
+);
+```
+**financialReport** -  zestawienie przychodów dla każdego webinaru/kursu/studium
+```SQL
+create view financialReport
+as
+select p.ProductID,p.ProductName,sum(pd.value) as TotalRevenues
+from products p
+join Subscriptions s
+on s.ProductID=p.ProductID
+join PaymentDetails pd
+on pd.SubID=s.SubID
+join ProductTypes pt
+on pt.ProductTypeID=p.ProductTypeID
+where ProductTypeName in ('kurs','webinar','studia','spotkanie studyjne')
+group by p.ProductID,p.ProductName
+```
+**ClientsWaitingForDiploma** - lista klientów i ich adresów korespondencyjnych, którzy powinni dostać dyplom, a nie dostali jeszcze.
+```SQL 
+create view ClientsWaitingForDiploma
+as
+select u.UserID, FirstName, LastName, Address
+from Users u
+join Subscriptions s
+on s.UserID=u.UserID
+where dbo.GetProductTypeName(s.ProductID) in ('kurs','studia')
+and IsPassed=1
+and ReceivedDiploma=0
+```
 
 ## Funkcje
 **freeseats** - pokazuje liczbę wolnych miejsc dla produktu o podanym ID
@@ -737,221 +776,32 @@ BEGIN
     RETURN @ProductTypeName;
 END;
 ```
-**AddToBasket** - funkcja dodaje produkt do koszyka danego użytkownika (z OnlyAdvance ustawionym na 0).
+**GetMeetingsSchedule** - zwraca tabelę z przyszłymi spotkaniami na które użytkownik jest zapisany.
 ```SQL
-ALTER PROCEDURE [dbo].[AddToBasket]
-    @UserID INT,
-    @ProductID INT
+CREATE FUNCTION GetMeetingsSchedule (@UserID INT)
+RETURNS TABLE
 AS
-BEGIN
-    exec removeUnpaidSubscriptions
-    IF NOT EXISTS (SELECT 1 FROM Users WHERE UserID = @UserID)
-    BEGIN
-        RAISERROR ('Użytkownik nie istnieje', 16, 1);
-        RETURN;
-    END;
-
-	if not exists (SELECT 1 from UserToRole where UserID=@UserID and RoleID=1)
-	begin
-	    RAISERROR ('Użytkownik nie jest klientem', 16, 1);
-        RETURN;
-    END;
-
-
-    IF NOT EXISTS (SELECT 1 FROM Products WHERE ProductID = @ProductID)
-    BEGIN
-        RAISERROR ('Produkt nie istnieje', 16, 1);
-        RETURN;
-    END;
-
-    if (select isactive from products where ProductID=@ProductID)=0
-	BEGIN
-        RAISERROR ('Produkt jest nieaktywny', 16, 1);
-        RETURN;
-    END;
-
-	if dbo.FreeSeats(@ProductID)=0
-	BEGIN
-        RAISERROR ('Brak miejsc', 16, 1);
-        RETURN;
-    END;
-
-	if (select IsForSale from Products p join ProductTypes pt
-	on pt.ProductTypeID=p.ProductTypeID
-	where ProductID=@ProductID)=0
-	BEGIN
-        RAISERROR ('Produkt nie jest na sprzedaż', 16, 1);
-        RETURN;
-    END;
-
-    IF EXISTS (SELECT 1 FROM Basket WHERE UserID = @UserID AND ProductID = @ProductID)
-    BEGIN
-        RAISERROR ('Produkt już znajduje się w koszyku', 16, 1);
-        RETURN;
-    END;
-
-    INSERT INTO Basket (UserID, ProductID,OnlyAdvance)
-    VALUES (@UserID, @ProductID,0);
-
-END;
-
+RETURN
+(
+    SELECT MeetingID, m.StartDate, m.EndDate, ProductName
+    FROM Meetings m
+    JOIN Products p ON p.ProductID = dbo.GetFinalProductID(m.ProductID)
+    JOIN Subscriptions s ON s.ProductID = p.ProductID
+    WHERE s.UserID = @UserID
+);
 ```
-**PayOnlyAdvance** - ustawia OnlyAdvance na 1, jeżeli jest możliwość zapłaty samej zaliczki dla podanego produktu.
+**StudentsBilocation** - raport bilokacji konkretnego użytkownika (tabela przyszłych spotkań na które użytkownik jest zapisany i kolidują ze sobą czasowo)
 ```SQL
-create procedure PayOnlyAdvance
-	@UserID int,
-	@ProdID int
+create function StudentsBilocation(@UserID int)
+returns table
 as
-begin
-if not exists (select 1 from Basket
-where @UserID=UserID
-and @ProdID=ProductID)
-begin
-	raiserror ('Podany użytkownik nie posiada tego produktu w koszyku',16,1)
-	return;
-end;
-if (select entryfee from Products p
-where p.ProductID=@ProdID) is null
-begin
-	raiserror ('Płatność ratalna nie jest możliwa',16,1)
-	return;
-end;
-update Basket
-set OnlyAdvance = 1
-where ProductID=@ProdID
-and UserID=@UserID;
-end;
+return(
+select distinct s1.* from dbo.getMeetingsSchedule(@UserID) s1
+join dbo.getMeetingsSchedule(@UserID) s2
+on s1.startdate between s2.startdate and s2.enddate
+and s1.meetingId!=s2.meetingId)
 ```
-**PayFullPrice** - zmienia OnlyAdvance na 0
-```SQL
-create procedure PayFullPrice
-	@UserID int,
-	@ProdID int
-as
-begin
-if not exists (select 1 from Basket
-where @UserID=UserID
-and @ProdID=ProductID)
-begin
-	raiserror ('Podany użytkownik nie posiada tego produktu w koszyku',16,1)
-	return;
-end;
 
-update Basket
-set OnlyAdvance = 0
-where ProductID=@ProdID
-and UserID=@UserID;
-end;
-```
-**DeleteFromBasket** - usuwa wybrany produkt z koszyka użytkownika
-```SQL
-create procedure DeleteFromBasket
-	@UserID int,
-	@ProdID int
-as
-begin
-if not exists (select 1 from Basket
-where @UserID=UserID
-and @ProdID=ProductID)
-begin
-	raiserror ('Podany użytkownik nie posiada tego produktu w koszyku',16,1)
-	return;
-end;
-
-delete from Basket
-where ProductID=@ProdID
-and UserID=@UserID;
-end;
-```
-**BuyNow** - przenosi produkty danego użytkownika z koszyka do subskrypcji z AccessAllowed ustawionym na 0
-(wyjątek - darmowe webinary - AccessAllowed jest wtedy ustawiony na 1).
-```SQL 
-ALTER PROCEDURE [dbo].[BuyNow]
-    @UserID INT
-AS
-BEGIN
-    BEGIN TRANSACTION;
-    exec removeUnpaidSubscriptions
-
-    IF NOT EXISTS (
-        SELECT 1 FROM Basket WHERE UserID = @UserID
-    )
-    BEGIN
-        RAISERROR ('Podany użytkownik nie posiada produktów w koszyku', 16, 1);
-        RETURN;
-    END;
-
-    IF EXISTS (
-        SELECT 1 
-        FROM Subscriptions s
-        JOIN Basket b ON b.UserID = s.UserID
-        WHERE s.UserID = @UserID AND s.ProductID = b.ProductID
-    )
-    BEGIN
-        RAISERROR ('Podany użytkownik posiada już subskrypcję na produkt ...', 16, 1);
-        RETURN;
-    END;
-
-    IF EXISTS (
-        SELECT ProductID
-        FROM Basket b
-        WHERE UserID = @UserID AND dbo.FreeSeats(ProductID) = 0
-    )
-    BEGIN
-        RAISERROR ('Brak miejsc na produkt ...', 16, 1);
-        RETURN;
-    END;
-
-	-- 15 minut na zapłacenie
-    INSERT INTO Subscriptions (UserID, ProductID,AccessAllowed,PaymentDeadline)
-    SELECT distinct UserID, p.ProductID,0, DATEADD(mi,15,Getdate())
-    FROM Basket b
-	join Products p
-	on p.ProductID=b.ProductID
-	where UserID=@UserID and p.FullPrice is not null;
-
-    DECLARE @Subscriptions TABLE (SubID INT, ProductID INT);
-    INSERT INTO @Subscriptions (SubID, ProductID)
-    SELECT distinct s.SubID, s.ProductID
-    FROM Subscriptions s
-    JOIN Basket b ON b.ProductID = s.ProductID
-    WHERE s.UserID = @UserID AND b.UserID = @UserID;
-
-    if exists (select 1 from @Subscriptions)
-    begin
-
-    DECLARE @MainPaymentLink NVARCHAR(64);
-    SET @MainPaymentLink = CONCAT('https://payment.', NEWID(), '.pl');
-
-    INSERT INTO Payments (IsPaid, Link)
-    VALUES (0, @MainPaymentLink);
-    DECLARE @MainPaymentID INT = SCOPE_IDENTITY();
-
-    INSERT INTO PaymentDetails (PaymentID, SubID, Value)
-    SELECT distinct
-        @MainPaymentID, 
-        s.SubID, 
-        CASE 
-            WHEN b.OnlyAdvance = 0 THEN p.FullPrice
-            ELSE p.EntryFee
-        END AS Value
-    FROM @Subscriptions s
-    JOIN Products p ON s.ProductID = p.ProductID
-    JOIN Basket b ON b.ProductID = p.ProductID and b.UserID=@UserID
-    WHERE p.SuperID IS NULL;
-    end;
-
-    INSERT INTO Subscriptions (UserID, ProductID,AccessAllowed)
-    SELECT distinct UserID, p.ProductID,1
-    FROM Basket b
-	join Products p
-	on p.ProductID=b.ProductID and b.OnlyAdvance=0
-	where UserID=@UserID and p.FullPrice is null;
-
-DELETE FROM Basket WHERE UserID = @UserID;
-COMMIT TRANSACTION;
-END;
-```
 
 **GetFinalProductID** - po podaniu id produktu rekurencyjnie szuka najstarszego przodka (produkt którego supreID jest NULL)
 ``` SQL
@@ -1479,6 +1329,221 @@ BEGIN
 
 END
 ```
+**AddToBasket** - funkcja dodaje produkt do koszyka danego użytkownika (z OnlyAdvance ustawionym na 0).
+```SQL
+ALTER PROCEDURE [dbo].[AddToBasket]
+    @UserID INT,
+    @ProductID INT
+AS
+BEGIN
+    exec removeUnpaidSubscriptions
+    IF NOT EXISTS (SELECT 1 FROM Users WHERE UserID = @UserID)
+    BEGIN
+        RAISERROR ('Użytkownik nie istnieje', 16, 1);
+        RETURN;
+    END;
+
+	if not exists (SELECT 1 from UserToRole where UserID=@UserID and RoleID=1)
+	begin
+	    RAISERROR ('Użytkownik nie jest klientem', 16, 1);
+        RETURN;
+    END;
+
+
+    IF NOT EXISTS (SELECT 1 FROM Products WHERE ProductID = @ProductID)
+    BEGIN
+        RAISERROR ('Produkt nie istnieje', 16, 1);
+        RETURN;
+    END;
+
+    if (select isactive from products where ProductID=@ProductID)=0
+	BEGIN
+        RAISERROR ('Produkt jest nieaktywny', 16, 1);
+        RETURN;
+    END;
+
+	if dbo.FreeSeats(@ProductID)=0
+	BEGIN
+        RAISERROR ('Brak miejsc', 16, 1);
+        RETURN;
+    END;
+
+	if (select IsForSale from Products p join ProductTypes pt
+	on pt.ProductTypeID=p.ProductTypeID
+	where ProductID=@ProductID)=0
+	BEGIN
+        RAISERROR ('Produkt nie jest na sprzedaż', 16, 1);
+        RETURN;
+    END;
+
+    IF EXISTS (SELECT 1 FROM Basket WHERE UserID = @UserID AND ProductID = @ProductID)
+    BEGIN
+        RAISERROR ('Produkt już znajduje się w koszyku', 16, 1);
+        RETURN;
+    END;
+
+    INSERT INTO Basket (UserID, ProductID,OnlyAdvance)
+    VALUES (@UserID, @ProductID,0);
+
+END;
+
+```
+**PayOnlyAdvance** - ustawia OnlyAdvance na 1, jeżeli jest możliwość zapłaty samej zaliczki dla podanego produktu.
+```SQL
+create procedure PayOnlyAdvance
+	@UserID int,
+	@ProdID int
+as
+begin
+if not exists (select 1 from Basket
+where @UserID=UserID
+and @ProdID=ProductID)
+begin
+	raiserror ('Podany użytkownik nie posiada tego produktu w koszyku',16,1)
+	return;
+end;
+if (select entryfee from Products p
+where p.ProductID=@ProdID) is null
+begin
+	raiserror ('Płatność ratalna nie jest możliwa',16,1)
+	return;
+end;
+update Basket
+set OnlyAdvance = 1
+where ProductID=@ProdID
+and UserID=@UserID;
+end;
+```
+**PayFullPrice** - zmienia OnlyAdvance na 0
+```SQL
+create procedure PayFullPrice
+	@UserID int,
+	@ProdID int
+as
+begin
+if not exists (select 1 from Basket
+where @UserID=UserID
+and @ProdID=ProductID)
+begin
+	raiserror ('Podany użytkownik nie posiada tego produktu w koszyku',16,1)
+	return;
+end;
+
+update Basket
+set OnlyAdvance = 0
+where ProductID=@ProdID
+and UserID=@UserID;
+end;
+```
+**DeleteFromBasket** - usuwa wybrany produkt z koszyka użytkownika
+```SQL
+create procedure DeleteFromBasket
+	@UserID int,
+	@ProdID int
+as
+begin
+if not exists (select 1 from Basket
+where @UserID=UserID
+and @ProdID=ProductID)
+begin
+	raiserror ('Podany użytkownik nie posiada tego produktu w koszyku',16,1)
+	return;
+end;
+
+delete from Basket
+where ProductID=@ProdID
+and UserID=@UserID;
+end;
+```
+**BuyNow** - przenosi produkty danego użytkownika z koszyka do subskrypcji z AccessAllowed ustawionym na 0
+(wyjątek - darmowe webinary - AccessAllowed jest wtedy ustawiony na 1).
+```SQL 
+ALTER PROCEDURE [dbo].[BuyNow]
+    @UserID INT
+AS
+BEGIN
+    BEGIN TRANSACTION;
+    exec removeUnpaidSubscriptions
+
+    IF NOT EXISTS (
+        SELECT 1 FROM Basket WHERE UserID = @UserID
+    )
+    BEGIN
+        RAISERROR ('Podany użytkownik nie posiada produktów w koszyku', 16, 1);
+        RETURN;
+    END;
+
+    IF EXISTS (
+        SELECT 1 
+        FROM Subscriptions s
+        JOIN Basket b ON b.UserID = s.UserID
+        WHERE s.UserID = @UserID AND s.ProductID = b.ProductID
+    )
+    BEGIN
+        RAISERROR ('Podany użytkownik posiada już subskrypcję na produkt ...', 16, 1);
+        RETURN;
+    END;
+
+    IF EXISTS (
+        SELECT ProductID
+        FROM Basket b
+        WHERE UserID = @UserID AND dbo.FreeSeats(ProductID) = 0
+    )
+    BEGIN
+        RAISERROR ('Brak miejsc na produkt ...', 16, 1);
+        RETURN;
+    END;
+
+	-- 15 minut na zapłacenie
+    INSERT INTO Subscriptions (UserID, ProductID,AccessAllowed,PaymentDeadline)
+    SELECT distinct UserID, p.ProductID,0, DATEADD(mi,15,Getdate())
+    FROM Basket b
+	join Products p
+	on p.ProductID=b.ProductID
+	where UserID=@UserID and p.FullPrice is not null;
+
+    DECLARE @Subscriptions TABLE (SubID INT, ProductID INT);
+    INSERT INTO @Subscriptions (SubID, ProductID)
+    SELECT distinct s.SubID, s.ProductID
+    FROM Subscriptions s
+    JOIN Basket b ON b.ProductID = s.ProductID
+    WHERE s.UserID = @UserID AND b.UserID = @UserID;
+
+    if exists (select 1 from @Subscriptions)
+    begin
+
+    DECLARE @MainPaymentLink NVARCHAR(64);
+    SET @MainPaymentLink = CONCAT('https://payment.', NEWID(), '.pl');
+
+    INSERT INTO Payments (IsPaid, Link)
+    VALUES (0, @MainPaymentLink);
+    DECLARE @MainPaymentID INT = SCOPE_IDENTITY();
+
+    INSERT INTO PaymentDetails (PaymentID, SubID, Value)
+    SELECT distinct
+        @MainPaymentID, 
+        s.SubID, 
+        CASE 
+            WHEN b.OnlyAdvance = 0 THEN p.FullPrice
+            ELSE p.EntryFee
+        END AS Value
+    FROM @Subscriptions s
+    JOIN Products p ON s.ProductID = p.ProductID
+    JOIN Basket b ON b.ProductID = p.ProductID and b.UserID=@UserID
+    WHERE p.SuperID IS NULL;
+    end;
+
+    INSERT INTO Subscriptions (UserID, ProductID,AccessAllowed)
+    SELECT distinct UserID, p.ProductID,1
+    FROM Basket b
+	join Products p
+	on p.ProductID=b.ProductID and b.OnlyAdvance=0
+	where UserID=@UserID and p.FullPrice is null;
+
+DELETE FROM Basket WHERE UserID = @UserID;
+COMMIT TRANSACTION;
+END;
+```
 **removeUnpaidSubscriptions** - usuwa subskrypcje, które nie mają przyznanego dostępu, a upłynął termin płatności (usuwa również dane tych płatności).
 ```SQL
 ALTER procedure [dbo].[removeUnpaidSubscriptions]
@@ -1676,4 +1741,28 @@ BEGIN
     END CATCH
 
 END
+```
+**ReceivedDiploma** - funkcja do zaznaczenie przez dyrektora kto i za co otrzymał dyplom.
+```SQL
+alter procedure ReceivedDiploma
+@SubID int
+as
+begin
+begin try
+	if exists (select 1 from Subscriptions where SubID=@SubID and dbo.GetProductTypeName(ProductID) in ('kurs', 'studia') and IsPassed=1)
+	begin
+		begin
+		update Subscriptions
+		set ReceivedDiploma=1
+		where SubID=@SubID
+		end
+	end
+	else 
+	throw 50000,'Nie można wystawić dyplomu za podaną subskrypcję lub podana subskrypcja nie istnieje',1;
+end try
+begin catch
+    DECLARE @ErrorMessage NVARCHAR(4000) = ERROR_MESSAGE();
+    THROW 50000, @ErrorMessage, 1
+END CATCH
+end
 ```
