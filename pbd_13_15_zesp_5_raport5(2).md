@@ -1949,7 +1949,7 @@ BEGIN
 	WHERE t.TranslatorID = @translatorID and m.StartDate > @todayDate
 END
 ```
-
+ProductSiege - pokazuje obleganie produktów
 ``` SQL
 CREATE or Alter PROCEDURE ProductSiege 
 
