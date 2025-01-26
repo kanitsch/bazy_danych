@@ -544,6 +544,7 @@ ALTER TABLE Translations ADD CONSTRAINT Translations_Users
 
 **vProductFreeSeats** - pokazuje wszystkie produkty wraz z aktualną liczbą wolnych miejsc 
 (wszystkie role) 
+[WN]
 ``` SQL
 alter   VIEW [dbo].[vProductFreeSeats]
 AS
@@ -564,7 +565,8 @@ WHERE
 
 ```
 **debtors_list** - lista dłużników, czyli osób, które skorzystały z usług, ale nie uiściły opłat
-(Dyrektor, Księgowy)
+(Dyrektor, Księgowy) 
+[KN]
 
 ```SQL
 create view debtors_list
@@ -584,6 +586,7 @@ and GETDATE()>s.PaymentDeadline
 ```
 **vTeachers** - wypisuje wszystkich nauczycieli
 (Dyrektor, Administrator)
+[WN]
 ``` SQL
 CREATE VIEW [dbo].[vTeachers]
 AS
@@ -595,6 +598,7 @@ WHERE     (r.RoleName = 'Nauczyciel')
 ```
 **vTranslators** - wypisuje wszystkich tłumaczy
 (Dyrektor, Administrator)
+[KN]
 ```SQL
 ALTER   VIEW [dbo].[vTranslators]
 AS
@@ -606,6 +610,7 @@ WHERE     (r.RoleName='Translator')
 ```
 **vClients** - wypisuje wszystkich klientów
 (Dyrektor, Administrator, Księgowy)
+[KN]
 ```SQL
 ALTER   VIEW [dbo].[vClients]
 AS
@@ -617,6 +622,7 @@ WHERE     (r.RoleName = 'Klient')
 ```
 **v_users_roles** - wypisuje użytkowników i ich role w systemie (id użytkownika, imię, nazwisko, rola)
 (Dyrektor, Administrator)
+[KN]
 ```SQL
 create view v_users_roles
 as
@@ -629,6 +635,7 @@ on r.RoleID=utr.RoleID
 **BilocationReport** -  lista osób, które są zapisane na co najmniej dwa przyszłe szkolenia, 
 które ze sobą kolidują czasowo.4
 (Dyrektor)
+[KN]
 ```SQL
 CREATE VIEW BilocationReport
 AS
@@ -641,6 +648,7 @@ WHERE EXISTS (
 ```
 **financialReport** -  zestawienie przychodów dla każdego webinaru/kursu/studium
 (Dyrektor, Księgowy)
+[KN]
 ```SQL
 alter view [dbo].[financialReport]
 as
@@ -657,6 +665,7 @@ group by p.ProductID,p.ProductName
 ```
 **ClientsWaitingForDiploma** - lista klientów i ich adresów korespondencyjnych, którzy powinni dostać dyplom, a nie dostali jeszcze.
 (Dyrektor)
+[KN]
 ```SQL 
 CREATE view [dbo].[ClientsWaitingForDiploma]
 as
@@ -674,6 +683,7 @@ and ReceivedDiploma=0
 ## Funkcje
 **freeseats** - pokazuje liczbę wolnych miejsc dla produktu o podanym ID
 (wszystkie role)
+[WN]
 ``` SQL
 ALTER   FUNCTION [dbo].[FreeSeats]
 (
@@ -699,6 +709,7 @@ END;
 ```
 **getProfits** - pokazuje zyski ze sprzedaży produktów dla podanego okresu
 (Dyrektor, Księgowy)
+[WN]
 ``` SQL
 SET ANSI_NULLS ON
 GO
@@ -722,6 +733,7 @@ END
 ```
 **GetUserBasket** - wyświetla koszyk danego użytkownika
 (Klient)
+[KN]
 ```SQL
 CREATE FUNCTION GetUserBasket (@UserID INT)
 RETURNS TABLE
@@ -747,6 +759,7 @@ RETURN
 );
 ```
 **GetProductsByID** - wypisuje ID produktu i wszystkich podproduktów (również podpodproduktów). Przydatne do tworzenia subskrypcji dla zakupionego produktu.
+[KN]
 ```SQL
 CREATE FUNCTION GetProductsByID (@ProductID INT)
 RETURNS TABLE
@@ -789,6 +802,7 @@ RETURN
 );
 ```
 **GetProductTypeName** - zwraca typ produktu dla produktu o podanym ID (funkcja pomocnicza)
+[KN]
 ```SQL
 ALTER FUNCTION [dbo].[GetProductTypeName] (@ProductID INT)
 RETURNS NVARCHAR(40)
@@ -810,6 +824,7 @@ END;
 ```
 **GetMeetingsSchedule** - zwraca tabelę z przyszłymi spotkaniami na które użytkownik jest zapisany.
 (Klient, Dyrektor)
+[KN]
 ```SQL
 CREATE FUNCTION GetMeetingsSchedule (@UserID INT)
 RETURNS TABLE
@@ -825,6 +840,7 @@ RETURN
 ```
 **StudentsBilocation** - raport bilokacji konkretnego użytkownika (tabela przyszłych spotkań na które użytkownik jest zapisany i kolidują ze sobą czasowo)
 (Klient, Dyrektor)
+[KN]
 ```SQL
 create function StudentsBilocation(@UserID int)
 returns table
@@ -838,6 +854,7 @@ and s1.meetingId!=s2.meetingId)
 
 
 **GetFinalProductID** - po podaniu id produktu rekurencyjnie szuka najstarszego przodka (produkt którego supreID jest NULL)
+[WN]
 ``` SQL
 ALTER    FUNCTION [dbo].[GetFinalProductID]
 (
@@ -868,6 +885,7 @@ BEGIN
 END
 ``` 
 **productStartDate** - zwraca datę pierwszego spotkania w ramach danego produktu.
+[KN]
 ```SQL
 create function productStartDate(@ProductID int)
 returns datetime
@@ -881,6 +899,7 @@ end
 
 **getUsersSubscriptions** - zwraca tabelę z subskrypcjami danego użutkownika i informacją o stanie zaliczenia/otrzymania dyplomu
 (Klient)
+[KN]
 ```sql
 create function getUsersSubscriptions(@UserId int)
 returns table
@@ -894,6 +913,7 @@ where userid=@UserId)
 ```
 **availableTranslations** - zwraca tabelę z dostępnymi tłumaczeniami na danym spotkaniu.
 (wszyscy użytkownicy)
+[KN]
 ```sql
 create function availableTranslations(@MeetingID int)
 returns table
@@ -910,6 +930,7 @@ where MeetingID=@MeetingID
 ```
 
 **areExamsPassed** - sprawdza czy wszystkie egzaminy w ramach danego przedmiotu są zaliczone
+[WN]
 ``` SQL
 ALTER FUNCTION [dbo].[areExamsPassed]
 (
@@ -945,6 +966,7 @@ END
 ```
 
 **calculateFrequency** - sprawdza czy klient spełnił wymagania zaliczenia dotyczące obecności
+[WN]
 ``` SQL
 ALTER   FUNCTION [dbo].[calculateFrequency]
 (
@@ -998,6 +1020,7 @@ END
 **validateMeetingProduct** - uniemożliwia wpisanie spotkania przypisanego do produktu, który nie należy do produktu z tabeli EduComponents dla danego ComponentID.
 Przykładowo, można wpisać spotkanie w ramach kursu, tylko jeżeli komponent również należy do tego kursu.
 W przypadku studiów produkt może być zjazdem, a komponent może należeć do semestru, w ramach którego odbywa się ten zjazd.
+[KN]
 ```SQL
 ALTER TRIGGER [dbo].[validateMeetingProduct]
 ON [dbo].[Meetings]
@@ -1021,6 +1044,7 @@ END;
 
 ```
 **only_translators** - uniemożliwia wpisania jako tłumacza użytkownika, który nie pełni tej roli w systemie
+[KN]
 ```SQL
 create trigger only_translators
 on dbo.Translations
@@ -1038,6 +1062,7 @@ begin
 end
 ```
 **check_teacher** - uniemożliwia wpisania jako nauczyciela użytkownika, który nie pełni tej roli w systemie. Sprawdza czy podany nauczyciel nie prowadzi w tym czasie innego spotkania. (wyjątek - studia i spotkanie studyjne)
+[KN]
 ```SQL
 ALTER trigger [dbo].[check_teacher]
 on [dbo].[Meetings]
@@ -1067,6 +1092,7 @@ end
 ```
 
 **accesAllowed** - Po ustawieniu pola AccessAllowed na 1, tworzy rekordy w tabeli Attendance, aby umożliwić uczestnictwo i rejestrowanie obecności na spotkaniach w ramach danej subskrypcji. 
+[KN]
 ``` SQL
 ALTER TRIGGER [dbo].[access_allowed] 
    ON  [dbo].[Subscriptions]
@@ -1165,6 +1191,7 @@ END
 
 **paymentcheck** - po opłaceniu pełnej kwoty zamówienia przyznawany jest dostęp do danej subskrypcji. Jeżeli zapłacono zaliczkę za studia, tworzone są osobne subskrypcje i płatności do poszczególnych zjazdów.
 Jeżeli zapłacono zaliczkę za kurs, tworzona jest nowa płatność do tej samej subskrypcji na pozostałą kwotę. Terminy wymaganej płatności są odpowiednio aktualizowane.
+[KN]
 ``` SQL
 ALTER   TRIGGER [dbo].[paymentcheck]
 ON [dbo].[Payments]
@@ -1274,6 +1301,7 @@ END;
 ```
 
 **CheckIfEnrolled** - uniemożliwia wprowadzeniu obecności osobie nie zapisanej na produkt do którego należy dane spotkanie
+[WN]
 ``` SQL
 ALTER TRIGGER [dbo].[CheckIfEnrolled]
 ON [dbo].[Attendance]
@@ -1315,6 +1343,7 @@ if not exists
 end
 ``` -->
 **checkComponentsProduct** - nie pozwala dodać do tabeli EduComponents komponentu należącego do innych produktów niż semstr lub kurs.
+[KN]
 ```SQL
 create trigger checkComponentsProduct
 on EduComponents
@@ -1334,6 +1363,7 @@ end
 
 **getMeetingAttendance** - zwraca tablicę obecności dla danego spotkania
 (Nauczyciel, Dyrektor)
+[WN]
 ```SQL
 ALTER   PROCEDURE [dbo].[getMeetingAttendance] 
 	@thisMeetingID INT
@@ -1354,6 +1384,7 @@ END
 ```
 **getStudiesSyllabus** - zwraca syllabus studiów
 (wszystkie role)
+[WN]
 ```SQL
 ALTER   PROCEDURE [dbo].[getStudiesSyllabus]
     @studyName NVARCHAR(MAX)
@@ -1374,6 +1405,7 @@ END
 ```
 **getSyllabusSemester** - zwraca syllabus dla danego semestru albo kursu
 (wszystkie role)
+[WN]
 ```SQL
 ALTER PROCEDURE [dbo].[getSyllabusSemester](
 	@semesterName nvarchar(MAX) = ''
@@ -1399,6 +1431,7 @@ END
 ```
 **getTotalUserAttendance** - zwraca całą zapisaną obecność dla danego użytkownika
 (Dyrektor, Klient)
+[WN]
 ```SQL
 ALTER   PROCEDURE [dbo].[getTotalUserAttendance]
 	-- Add the parameters for the stored procedure here
@@ -1451,6 +1484,7 @@ END
 ```
 **getUserComponentAttendance** - obecność danego użytkownika na danym przedmiocie
 (Nauczyciel, Dyrektor, Klient)
+[WN]
 ```SQL
 ALTER   PROCEDURE [dbo].[getUserComponentAttendance]
 	-- Add the parameters for the stored procedure here
@@ -1508,6 +1542,7 @@ END
 
 **getUserSubjectGrades** - zwraca oceny danego użytkownika z danego przedmiotu wraz z detalami
 (Klient, Nauczyciel, Dyrektor)
+[WN]
 ```SQL
 ALTER   PROCEDURE [dbo].[getUserSubjectGrades]
 	-- Add the parameters for the stored procedure here
@@ -1553,6 +1588,7 @@ END
 ```
 **getAllUserGrades** - zwraca wszystkie oceny użytkownika
 (Klient, Dyrektor)
+[WN]
 ```SQL
 ALTER   PROCEDURE [dbo].[getAllUserGrades]
 	-- Add the parameters for the stored procedure here
@@ -1594,6 +1630,7 @@ END
 ```
 **AddToBasket** - dodaje produkt do koszyka danego użytkownika (z OnlyAdvance ustawionym na 0).
 (Klient)
+[KN]
 ```SQL
 ALTER PROCEDURE [dbo].[AddToBasket]
     @UserID INT,
@@ -1654,6 +1691,7 @@ END;
 ```
 **PayOnlyAdvance** - ustawia OnlyAdvance na 1, jeżeli jest możliwość zapłaty samej zaliczki dla podanego produktu.
 (Klient)
+[KN]
 ```SQL
 create procedure PayOnlyAdvance
 	@UserID int,
@@ -1703,6 +1741,7 @@ end;
 ```
 **DeleteFromBasket** - usuwa wybrany produkt z koszyka użytkownika
 (Klient)
+[KN]
 ```SQL
 create procedure DeleteFromBasket
 	@UserID int,
@@ -1725,6 +1764,7 @@ end;
 **BuyNow** - przenosi produkty danego użytkownika z koszyka do subskrypcji z AccessAllowed ustawionym na 0
 (wyjątek - darmowe webinary - AccessAllowed jest wtedy ustawiony na 1).
 (Klient)
+[KN]
 ``` SQL
 ALTER PROCEDURE [dbo].[BuyNow]
     @UserID INT
@@ -1902,6 +1942,7 @@ COMMIT TRANSACTION;
 END;
 ``` -->
 **removeUnpaidSubscriptions** - usuwa subskrypcje, które nie mają przyznanego dostępu, a upłynął termin płatności (usuwa również dane tych płatności).
+[KN]
 ```SQL
 ALTER procedure [dbo].[removeUnpaidSubscriptions]
 as
@@ -1924,6 +1965,7 @@ end;
 ```
 **setDeferredPaymentConsent** - procedura dla dyrektora, do ustawiania zgody na płatność odroczoną dla podanej subskrypcji i wyznaczenia daty wymaganej płatności.
 (Dyrektor)
+[KN]
 ```SQL
 CREATE PROCEDURE setDeferredPaymentConsent
     @SubID INT,
@@ -1953,6 +1995,7 @@ END;
 ```
 **registerClient** - procedura rejestrująca nowego użytkownika i przyznająca mu rolę klienta
 (Użytkownik niezalogowany - proces tworzenia konta klienta)
+[KN]
 ```SQL
 CREATE PROCEDURE registerClient
     @FirstName NVARCHAR(20),
@@ -1983,6 +2026,7 @@ END;
 ```
 **registerUser** - rejestracja użytkownika bez podania roli i adresu (adres jest wymagany tylko dla klientów)
 (Administrator)
+[KN]
 ```SQL
 CREATE PROCEDURE registerUser
     @FirstName NVARCHAR(20),
@@ -2008,6 +2052,7 @@ END;
 ```
 **AssignRole** - przypisuje rolę podanemu użytkownikowi. Rolę klient można przypisać tylko, jeżeli użytkownik podał adres.
 (Administrator)
+[KN]
 ```SQL
 ALTER PROCEDURE AssignRole
     @UserID INT,
@@ -2046,6 +2091,7 @@ END;
 ```
 **addAddress** - aktualizuje adres podanego użytkownika.
 (wszystkie role)
+[KN]
 ```SQL
 alter PROCEDURE addAddress
     @UserID INT,
@@ -2070,6 +2116,7 @@ END;
 ```
 **RemoveUsersRole** - odbiera użytkownikowi rolę.
 (Administrator)
+[KN]
 ```SQL
 CREATE PROCEDURE [dbo].[RemoveUsersRole]
     @UserID INT,
@@ -2106,6 +2153,7 @@ END
 ```
 **ReceivedDiploma** - procedura do zaznaczenie przez dyrektora kto i za co otrzymał dyplom.
 (Dyrektor)
+[KN]
 ```SQL
 alter procedure ReceivedDiploma
 @SubID int
@@ -2129,8 +2177,9 @@ begin catch
 END CATCH
 end
 ```
-TeacherSchedule - plan nadchodzących spotkań nauczyciela
+**TeacherSchedule** - plan nadchodzących spotkań nauczyciela
 (Nauczyciel, Dyrektor)
+[WN]
 ``` SQL
 CREATE or ALTER PROCEDURE TeacherSchedule
 	@teacherID int,
@@ -2145,8 +2194,9 @@ BEGIN
 END
 GO
 ```
-TranslatorSchedule - plan nadchodzących spotkań dla tłumacza
+**TranslatorSchedule** - plan nadchodzących spotkań dla tłumacza
 (Tłumacz, Dyrektor)
+[WN]
 ``` SQL
 ALTER   PROCEDURE [dbo].[TranslatorSchedule]
 	-- Add the parameters for the stored procedure here
@@ -2165,7 +2215,8 @@ BEGIN
 	WHERE t.TranslatorID = @translatorID and m.StartDate > @todayDate
 END
 ```
-ProductSiege - pokazuje obleganie produktów
+**ProductSiege** - pokazuje obleganie produktów
+[WN]
 ``` SQL
 CREATE or Alter PROCEDURE ProductSiege 
 
@@ -2193,8 +2244,9 @@ END
 GO
 ```
 
-ProductPassUpdate - aktualizacja statusu zaliczenia produktu na podstawie obecności oraz ocen z egznaminów
+**ProductPassUpdate** - aktualizacja statusu zaliczenia produktu na podstawie obecności oraz ocen z egznaminów
 (Administrator, Nauczyciel)
+[WN]
 ``` SQL
 ALTER PROCEDURE [dbo].[ProductPassUpdate]
     @userID INT,
@@ -2222,4 +2274,5 @@ BEGIN
     END
 END;
 ```
-
+[KN] - Karolina Nitsch
+[WN] - Witold Nieć
