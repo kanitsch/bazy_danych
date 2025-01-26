@@ -930,6 +930,7 @@ where MeetingID=@MeetingID
 ```
 
 **areExamsPassed** - sprawdza czy wszystkie egzaminy w ramach danego przedmiotu są zaliczone
+[WN]
 ``` SQL
 ALTER FUNCTION [dbo].[areExamsPassed]
 (
@@ -965,6 +966,7 @@ END
 ```
 
 **calculateFrequency** - sprawdza czy klient spełnił wymagania zaliczenia dotyczące obecności
+[WN]
 ``` SQL
 ALTER   FUNCTION [dbo].[calculateFrequency]
 (
@@ -2175,8 +2177,9 @@ begin catch
 END CATCH
 end
 ```
-TeacherSchedule - plan nadchodzących spotkań nauczyciela
+**TeacherSchedule** - plan nadchodzących spotkań nauczyciela
 (Nauczyciel, Dyrektor)
+[WN]
 ``` SQL
 CREATE or ALTER PROCEDURE TeacherSchedule
 	@teacherID int,
@@ -2191,8 +2194,9 @@ BEGIN
 END
 GO
 ```
-TranslatorSchedule - plan nadchodzących spotkań dla tłumacza
+**TranslatorSchedule** - plan nadchodzących spotkań dla tłumacza
 (Tłumacz, Dyrektor)
+[WN]
 ``` SQL
 ALTER   PROCEDURE [dbo].[TranslatorSchedule]
 	-- Add the parameters for the stored procedure here
@@ -2211,7 +2215,8 @@ BEGIN
 	WHERE t.TranslatorID = @translatorID and m.StartDate > @todayDate
 END
 ```
-ProductSiege - pokazuje obleganie produktów
+**ProductSiege** - pokazuje obleganie produktów
+[WN]
 ``` SQL
 CREATE or Alter PROCEDURE ProductSiege 
 
@@ -2239,8 +2244,9 @@ END
 GO
 ```
 
-ProductPassUpdate - aktualizacja statusu zaliczenia produktu na podstawie obecności oraz ocen z egznaminów
+**ProductPassUpdate** - aktualizacja statusu zaliczenia produktu na podstawie obecności oraz ocen z egznaminów
 (Administrator, Nauczyciel)
+[WN]
 ``` SQL
 ALTER PROCEDURE [dbo].[ProductPassUpdate]
     @userID INT,
@@ -2268,4 +2274,5 @@ BEGIN
     END
 END;
 ```
-
+[KN] - Karolina Nitsch
+[WN] - Witold Nieć
