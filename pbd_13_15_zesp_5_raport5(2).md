@@ -865,6 +865,90 @@ select min(startdate) from Meetings m
 where dbo.GetFinalProductID(m.ProductID)=@ProductID)
 end
 ```
+areExamsPassed - sprawdza czy wszystkie egzaminy w ramach danego przedmiotu są zaliczone
+``` SQL
+ALTER FUNCTION [dbo].[areExamsPassed]
+(
+	-- Add the parameters for the function here
+	@userID int, @compID int
+
+)
+RETURNS bit
+AS
+BEGIN
+	-- Declare the return variable here
+	DECLARE @result bit
+
+	-- Add the T-SQL statements to compute the return value here
+	SET @result = CASE
+                 WHEN NOT EXISTS (
+                     SELECT 1
+                     FROM Attendance a
+                     JOIN Subscriptions s ON s.SubID = a.SubID
+                     JOIN Meetings m ON m.MeetingID = a.MeetingID
+                     WHERE s.UserID = @userID
+                     AND m.ComponentID = @compID
+                     AND a.grade NOT IN (2, 0)
+                 ) THEN 1
+                 ELSE 0
+              END;
+
+	-- Return the result of the function
+	RETURN @result
+
+END
+
+```
+
+calculateFrequency - sprawdza czy klient spełnił wymagania zaliczenia dotyczące obecności
+``` SQL
+ALTER   FUNCTION [dbo].[calculateFrequency]
+(
+	-- Add the parameters for the function here
+	@compID int, @userID int
+)
+RETURNS bit
+AS
+BEGIN
+	-- Declare the return variable here
+	DECLARE @result bit
+
+	-- Add the T-SQL statements to compute the return value here
+	DECLARE @allCnt int
+	if (select count(*) from Meetings m
+	join Attendance a on a.MeetingID = m.MeetingID
+	join Subscriptions s on s.SubID = a.SubID
+	where m.ComponentID = @compID and s.UserID = @userID) > 0
+	begin 
+	
+
+		SET @allCnt = (select count(*) from Meetings m
+		join Attendance a on a.MeetingID = m.MeetingID
+		join Subscriptions s on s.SubID = a.SubID
+		where m.ComponentID = @compID and s.UserID = @userID and a.Presence = 1) /
+		(select count(*) from Meetings m
+		join Attendance a on a.MeetingID = m.MeetingID
+		join Subscriptions s on s.SubID = a.SubID
+		where m.ComponentID = @compID and s.UserID = @userID)
+
+		SET @result = CASE 
+					 WHEN @allCnt >= ISNULL((SELECT FreqToPass FROM EduComponents WHERE ComponentID = @compID), 0) 
+					 THEN 1
+					 ELSE 0
+				  END;
+	end
+	else 
+	begin 
+		set @result = 1
+	end
+	-- Return the result of the function
+	RETURN @result
+
+END
+
+```
+
+
 ## Triggery
 
 
@@ -1975,5 +2059,35 @@ BEGIN
 	ORDER BY [Start Date]
 END
 GO
+```
+
+ProductPassUpdate - aktualizacja statusu zaliczenia produktu na podstawie obecności oraz ocen z egznaminów
+(Administrator, Nauczyciel)
+``` SQL
+ALTER PROCEDURE [dbo].[ProductPassUpdate]
+    @userID INT,
+    @prodID INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM EduComponents ec
+        WHERE ec.ProductID = @prodID
+        AND (dbo.areExamsPassed(@userID, ec.ComponentID) = 0 
+             OR dbo.calculateFrequency(@userID, ec.ComponentID) = 0)
+    )
+    and EXISTS (
+        SELECT s.SubID
+        FROM Subscriptions s
+        WHERE s.ProductID = @prodID AND s.UserID = @userID AND s.isPassed = 0
+    )
+    BEGIN
+
+        UPDATE Subscriptions
+        SET isPassed = 1
+        WHERE ProductID = @prodID AND UserID = @userID;
+    END
+END;
 ```
 
