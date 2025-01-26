@@ -203,6 +203,7 @@ CREATE TABLE Roles (
     CONSTRAINT Roles_pk PRIMARY KEY  (RoleID)
 );
 ```
+
 **3. UserToRole**
 Tabela UserToRole pełnii funkcje tabeli pośredniej, łączącej tabele Users i Roles. Dzięki tej tabeli realizujemy relację wiele do wiele tzn. jeden użytkownik może mieć wiele ról i wielu użytkowników może mieć tą samą rolę. 
 Pola:
@@ -297,6 +298,7 @@ CREATE TABLE Products (
     MaxSeats int  NULL,
     IsActive bit  NOT NULL,
     SuperID int  NULL,
+    Alias nvarchar(100) NOT NULL UNIQUE,
     CONSTRAINT Products_pk PRIMARY KEY  (ProductID)
 );
 
@@ -455,6 +457,7 @@ CREATE TABLE Attendance (
     Presence bit  NOT NULL,
     SubID int  NOT NULL,
     Grade decimal(2,1)  NULL CHECK (Grade in (2.0,3.0,3.5,4.0,4.5,5.0)),
+    AbsenceMakeupMeetingID int NULL,
     CONSTRAINT Attendance_pk PRIMARY KEY  (MeetingID,SubID)
 );
 
@@ -537,9 +540,10 @@ ALTER TABLE Translations ADD CONSTRAINT Translations_Users
     REFERENCES Users (UserID);
 ```
 
-## Widoki
+## Widoki 
 
-**vProductFreeSeats** - pokazuje wszystkie produkty wraz z aktualną liczbą wolnych miejsc
+**vProductFreeSeats** - pokazuje wszystkie produkty wraz z aktualną liczbą wolnych miejsc 
+(wszystkie role) 
 ``` SQL
 CREATE or alter VIEW [dbo].[vProductFreeSeats]
 AS
@@ -549,8 +553,11 @@ FROM       Products p
 where p.ProductTypeID = pt.ProductTypeID
 and p.IsActive = 1
 GO
+
 ```
 **debtors_list** - lista dłużników, czyli osób, które skorzystały z usług, ale nie uiściły opłat
+(Dyrektor, Księgowy)
+
 ```SQL
 create view debtors_list
 as
@@ -568,6 +575,7 @@ where p.IsPaid=0 and a.Presence=1
 and GETDATE()>s.PaymentDeadline
 ```
 **vTeachers** - wypisuje wszystkich nauczycieli
+(Dyrektor, Administrator)
 ``` SQL
 CREATE VIEW [dbo].[vTeachers]
 AS
@@ -578,6 +586,7 @@ FROM        dbo.Users AS u INNER JOIN
 WHERE     (r.RoleName = 'Nauczyciel')
 ```
 **vTranslators** - wypisuje wszystkich tłumaczy
+(Dyrektor, Administrator)
 ```SQL
 ALTER   VIEW [dbo].[vTranslators]
 AS
@@ -588,6 +597,7 @@ FROM        dbo.Users AS u INNER JOIN
 WHERE     (r.RoleName='Translator')
 ```
 **vClients** - wypisuje wszystkich klientów
+(Dyrektor, Administrator, Księgowy)
 ```SQL
 ALTER   VIEW [dbo].[vClients]
 AS
@@ -598,6 +608,7 @@ FROM        dbo.Users AS u INNER JOIN
 WHERE     (r.RoleName = 'Klient')
 ```
 **v_users_roles** - wypisuje użytkowników i ich role w systemie (id użytkownika, imię, nazwisko, rola)
+(Dyrektor, Administrator)
 ```SQL
 create view v_users_roles
 as
@@ -608,7 +619,8 @@ join Roles r
 on r.RoleID=utr.RoleID
 ```
 **BilocationReport** -  lista osób, które są zapisane na co najmniej dwa przyszłe szkolenia, 
-które ze sobą kolidują czasowo.
+które ze sobą kolidują czasowo.4
+(Dyrektor)
 ```SQL
 CREATE VIEW BilocationReport
 AS
@@ -620,6 +632,7 @@ WHERE EXISTS (
 );
 ```
 **financialReport** -  zestawienie przychodów dla każdego webinaru/kursu/studium
+(Dyrektor, Księgowy)
 ```SQL
 alter view [dbo].[financialReport]
 as
@@ -635,6 +648,7 @@ where ProductTypeName in ('kurs','webinar','studia','spotkanie studyjne')
 group by p.ProductID,p.ProductName
 ```
 **ClientsWaitingForDiploma** - lista klientów i ich adresów korespondencyjnych, którzy powinni dostać dyplom, a nie dostali jeszcze.
+(Dyrektor)
 ```SQL 
 CREATE view [dbo].[ClientsWaitingForDiploma]
 as
@@ -651,6 +665,7 @@ and ReceivedDiploma=0
 
 ## Funkcje
 **freeseats** - pokazuje liczbę wolnych miejsc dla produktu o podanym ID
+(wszystkie role)
 ``` SQL
 SET ANSI_NULLS ON
 GO
@@ -670,6 +685,7 @@ begin
 end
 ```
 **getProfits** - pokazuje zyski ze sprzedaży produktów dla podanego okresu
+(Dyrektor, Księgowy)
 ``` SQL
 SET ANSI_NULLS ON
 GO
@@ -692,6 +708,7 @@ END
 
 ```
 **GetUserBasket** - wyświetla koszyk danego użytkownika
+(Klient)
 ```SQL
 CREATE FUNCTION GetUserBasket (@UserID INT)
 RETURNS TABLE
@@ -779,6 +796,7 @@ BEGIN
 END;
 ```
 **GetMeetingsSchedule** - zwraca tabelę z przyszłymi spotkaniami na które użytkownik jest zapisany.
+(Klient, Dyrektor)
 ```SQL
 CREATE FUNCTION GetMeetingsSchedule (@UserID INT)
 RETURNS TABLE
@@ -793,6 +811,7 @@ RETURN
 );
 ```
 **StudentsBilocation** - raport bilokacji konkretnego użytkownika (tabela przyszłych spotkań na które użytkownik jest zapisany i kolidują ze sobą czasowo)
+(Klient, Dyrektor)
 ```SQL
 create function StudentsBilocation(@UserID int)
 returns table
@@ -948,7 +967,7 @@ END
 
 
 ```
-
+<!-- 
 **checkPass** - po każdym wprowadzeniu obecności dla studiów sprawdzany jest stan zaliczenia
 
 ``` SQL
@@ -1015,7 +1034,7 @@ declare
 
 end
 END
-``` 
+```  -->
 
 **paymentcheck** - po opłaceniu pełnej kwoty zamówienia przyznawany jest dostęp do danej subskrypcji. Jeżeli zapłacono zaliczkę za studia, tworzone są osobne subskrypcje i płatności do poszczególnych zjazdów.
 Jeżeli zapłacono zaliczkę za kurs, tworzona jest nowa płatność do tej samej subskrypcji na pozostałą kwotę. Terminy wymaganej płatności są odpowiednio aktualizowane.
@@ -1187,6 +1206,7 @@ end
 ## Procedury
 
 **getMeetingAttendance** - zwraca tablicę obecności dla danego spotkania
+(Nauczyciel, Dyrektor)
 ```SQL
 ALTER   PROCEDURE [dbo].[getMeetingAttendance] 
 	@thisMeetingID INT
@@ -1206,6 +1226,7 @@ BEGIN
 END
 ```
 **getStudiesSyllabus** - zwraca syllabus studiów
+(wszystkie role)
 ```SQL
 ALTER   PROCEDURE [dbo].[getStudiesSyllabus]
     @studyName NVARCHAR(MAX)
@@ -1224,50 +1245,85 @@ BEGIN
 	
 END
 ```
-**getSyllabusSemester** - zwraca syllabus dla danego semestru
+**getSyllabusSemester** - zwraca syllabus dla danego semestru albo kursu
+(wszystkie role)
 ```SQL
 ALTER PROCEDURE [dbo].[getSyllabusSemester](
 	@semesterName nvarchar(MAX) = ''
 )
 AS
 BEGIN
-	-- SET NOCOUNT ON added to prevent extra result sets from
-	-- interfering with SELECT statements.
 	SET NOCOUNT ON;
-
-    -- Insert statements for procedure here
-	SELECT ec.Name as Name, ec.Description as Description
-	FROM EduComponents ec join Products p on ec.ProductID = p.ProductID
-	join ProductTypes pt on p.ProductTypeID = pt.ProductTypeID
-	where pt.ProductTypeName = 'Semestr' and p.ProductName = @semesterName
+SELECT 
+    ec.ComponentID, 
+    ec.Name AS Name, 
+    CAST(ec.Description as nvarchar(MAX)) AS Description, 
+    COUNT(m.MeetingID) AS MeetingCount
+FROM 
+    EduComponents ec
+JOIN Products p ON ec.ProductID = p.ProductID
+JOIN ProductTypes pt ON p.ProductTypeID = pt.ProductTypeID
+JOIN Meetings m ON m.ComponentID = ec.ComponentID
+WHERE pt.ProductTypeName in ('Semestr','Kurs') 
+    AND p.Alias = @semesterName
+GROUP BY ec.ComponentID, ec.Name, CAST(ec.Description as nvarchar(MAX))
+ORDER BY CAST(ec.Name AS NVARCHAR(MAX));
 END
 ```
 **getTotalUserAttendance** - zwraca całą zapisaną obecność dla danego użytkownika
+(Dyrektor, Klient)
 ```SQL
 ALTER   PROCEDURE [dbo].[getTotalUserAttendance]
 	-- Add the parameters for the stored procedure here
-	@userName nvarchar(MAX)
+	@userName nvarchar(MAX) = '',
+	@userID int = -1
 AS
 BEGIN
 	-- SET NOCOUNT ON added to prevent extra result sets from
 	-- interfering with SELECT statements.
 	SET NOCOUNT ON;
 
-    -- Insert statements for procedure here
-	SELECT ec.Name, m.MeetingID, a.Presence, CAST(a.Presence AS INT) as IntCast
-	FROM Attendance a join Subscriptions s on s.SubID = a.SubID
-	join Users u on u.UserID = s.UserID
-	join Meetings m on m.MeetingID = a.MeetingID
-	join EduComponents ec on ec.ComponentID = m.ComponentID
-	WHERE CONCAT(u.FirstName, ' ', u.LastName) = @userName
+	IF @userID = -1 AND dbo.studentNameToUserIdNum(@userName) > 1
+	BEGIN
+		throw 51000, 'Wielu uczniów o tym samym imieniu i nazwisku', 1;
+	END
 
-	SELECT avg(CAST(a.Presence AS float)) AS Frequency 
-	FROM Attendance a join Subscriptions s on s.SubID = a.SubID
-	join Users u on u.UserID = s.UserID
-	WHERE CONCAT(u.FirstName, ' ', u.LastName) = @userName
+	IF @userID = -1
+	begin
+		SELECT ec.Name, m.MeetingID, a.Presence, CAST(a.Presence AS INT) as IntCast
+		FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+		join Users u on u.UserID = s.UserID
+		join Meetings m on m.MeetingID = a.MeetingID
+		join EduComponents ec on ec.ComponentID = m.ComponentID
+		WHERE CONCAT(u.FirstName, ' ', u.LastName) = @userName
+		order by ec.Name
+
+		SELECT avg(CAST(a.Presence AS float)) AS Frequency 
+		FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+		join Users u on u.UserID = s.UserID
+		WHERE CONCAT(u.FirstName, ' ', u.LastName) = @userName
+		
+	end
+	else
+	begin
+		SELECT ec.Name, m.MeetingID, a.Presence, CAST(a.Presence AS INT) as IntCast
+		FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+		join Users u on u.UserID = s.UserID
+		join Meetings m on m.MeetingID = a.MeetingID
+		join EduComponents ec on ec.ComponentID = m.ComponentID
+		WHERE u.UserID = @userID
+		order by ec.Name
+
+		SELECT avg(CAST(a.Presence AS float)) AS Frequency 
+		FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+		join Users u on u.UserID = s.UserID
+		WHERE u.UserID = @userID
+	end
+
 END
 ```
 **getUserComponentAttendance** - obecność danego użytkownika na danym przedmiocie
+(Nauczyciel, Dyrektor, Klient)
 ```SQL
 ALTER   PROCEDURE [dbo].[getUserComponentAttendance]
 	-- Add the parameters for the stored procedure here
@@ -1299,6 +1355,7 @@ END
 ```
 
 **getUserSubjectGrades** - zwraca oceny danego użytkownika z danego przedmiotu wraz z detalami
+(Klient, Nauczyciel, Dyrektor)
 ```SQL
 ALTER   PROCEDURE [dbo].[getUserSubjectGrades]
 	-- Add the parameters for the stored procedure here
@@ -1323,6 +1380,7 @@ BEGIN
 END
 ```
 **getAllUserGrades** - zwraca wszystkie oceny użytkownika
+(Klient, Dyrektor)
 ```SQL
 ALTER   PROCEDURE [dbo].[getAllUserGrades]
 
@@ -1343,6 +1401,7 @@ BEGIN
 END
 ```
 **AddToBasket** - funkcja dodaje produkt do koszyka danego użytkownika (z OnlyAdvance ustawionym na 0).
+(Klient)
 ```SQL
 ALTER PROCEDURE [dbo].[AddToBasket]
     @UserID INT,
@@ -1402,6 +1461,7 @@ END;
 
 ```
 **PayOnlyAdvance** - ustawia OnlyAdvance na 1, jeżeli jest możliwość zapłaty samej zaliczki dla podanego produktu.
+(Klient)
 ```SQL
 create procedure PayOnlyAdvance
 	@UserID int,
@@ -1428,6 +1488,7 @@ and UserID=@UserID;
 end;
 ```
 **PayFullPrice** - zmienia OnlyAdvance na 0
+(Klient)
 ```SQL
 create procedure PayFullPrice
 	@UserID int,
@@ -1449,6 +1510,7 @@ and UserID=@UserID;
 end;
 ```
 **DeleteFromBasket** - usuwa wybrany produkt z koszyka użytkownika
+(Klient)
 ```SQL
 create procedure DeleteFromBasket
 	@UserID int,
@@ -1470,6 +1532,7 @@ end;
 ```
 **BuyNow** - przenosi produkty danego użytkownika z koszyka do subskrypcji z AccessAllowed ustawionym na 0
 (wyjątek - darmowe webinary - AccessAllowed jest wtedy ustawiony na 1).
+(Klient)
 ```SQL 
 ALTER PROCEDURE [dbo].[BuyNow]
     @UserID INT
@@ -1579,7 +1642,7 @@ begin
 end;
 ```
 **setDeferredPaymentConsent** - procedura dla dyrektora, do ustawiania zgody na płatność odroczoną dla podanej subskrypcji i wyznaczenia daty wymaganej płatności.
-
+(Dyrektor)
 ```SQL
 CREATE PROCEDURE setDeferredPaymentConsent
     @SubID INT,
@@ -1608,6 +1671,7 @@ BEGIN
 END;
 ```
 **registerClient** - procedura rejestrująca nowego użytkownika i przyznająca mu rolę klienta
+(Użytkownik niezalogowany - proces tworzenia konta klienta)
 ```SQL
 CREATE PROCEDURE registerClient
     @FirstName NVARCHAR(20),
@@ -1637,6 +1701,7 @@ BEGIN
 END;
 ```
 **registerUser** - rejestracja użytkownika bez podania roli i adresu (adres jest wymagany tylko dla klientów) - funkcja administratora
+(Administrator)
 ```SQL
 CREATE PROCEDURE registerUser
     @FirstName NVARCHAR(20),
@@ -1661,6 +1726,7 @@ BEGIN
 END;
 ```
 **AssignRole** - przypisuje rolę podanemu użytkownikowi. Rolę klient można przypisać tylko, jeżeli użytkownik podał adres.
+(Administrator)
 ```SQL
 ALTER PROCEDURE AssignRole
     @UserID INT,
@@ -1698,6 +1764,7 @@ BEGIN
 END;
 ```
 **addAddress** - aktualizuje adres podanego użytkownika.
+(wszystkie role)
 ```SQL
 alter PROCEDURE addAddress
     @UserID INT,
@@ -1721,6 +1788,7 @@ BEGIN
 END;
 ```
 **RemoveUsersRole** - odbiera użytkownikowi rolę.
+(Administrator)
 ```SQL
 CREATE PROCEDURE [dbo].[RemoveUsersRole]
     @UserID INT,
@@ -1756,6 +1824,7 @@ BEGIN
 END
 ```
 **ReceivedDiploma** - funkcja do zaznaczenie przez dyrektora kto i za co otrzymał dyplom.
+(Dyrektor)
 ```SQL
 alter procedure ReceivedDiploma
 @SubID int
