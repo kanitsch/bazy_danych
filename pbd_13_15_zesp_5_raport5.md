@@ -612,7 +612,7 @@ które ze sobą kolidują czasowo.
 ```SQL
 CREATE VIEW BilocationReport
 AS
-SELECT u.*
+SELECT userid, FirstName, LastName, Address, Email
 FROM Users u
 WHERE EXISTS (
     SELECT 1
@@ -621,9 +621,9 @@ WHERE EXISTS (
 ```
 **financialReport** -  zestawienie przychodów dla każdego webinaru/kursu/studium
 ```SQL
-create view financialReport
+alter view [dbo].[financialReport]
 as
-select p.ProductID,p.ProductName,sum(pd.value) as TotalRevenues
+select p.ProductID,p.ProductName, dbo.GetProductTypeName(p.ProductID) as ProductType ,sum(pd.value) as TotalRevenues, dbo.productstartdate(p.productID) as StartDate
 from products p
 join Subscriptions s
 on s.ProductID=p.ProductID
@@ -636,12 +636,14 @@ group by p.ProductID,p.ProductName
 ```
 **ClientsWaitingForDiploma** - lista klientów i ich adresów korespondencyjnych, którzy powinni dostać dyplom, a nie dostali jeszcze.
 ```SQL 
-create view ClientsWaitingForDiploma
+CREATE view [dbo].[ClientsWaitingForDiploma]
 as
-select u.UserID, FirstName, LastName, Address
+select u.UserID, FirstName, LastName, Address, s.SubID, p.ProductName
 from Users u
 join Subscriptions s
 on s.UserID=u.UserID
+join Products p
+on p.ProductID=s.ProductID
 where dbo.GetProductTypeName(s.ProductID) in ('kurs','studia')
 and IsPassed=1
 and ReceivedDiploma=0
@@ -833,6 +835,17 @@ BEGIN
 	RETURN @result
 END
 ``` 
+**productStartDate** - zwraca datę pierwszego spotkania w ramach danego produktu.
+```SQL
+create function productStartDate(@ProductID int)
+returns datetime
+as
+begin
+return(
+select min(startdate) from Meetings m
+where dbo.GetFinalProductID(m.ProductID)=@ProductID)
+end
+```
 ## Triggery
 
 
@@ -1140,12 +1153,12 @@ GO
 ```
 **checkUsersRole** - sprawdza czy użytkownik wpisywany do tabeli Subscriptions jest klientem. W przeciwnym razie rzuca błąd i cofa transakcję.
 ```SQL
-create trigger checkUsersRole
-on subscriptions
+ALTER trigger [dbo].[checkUsersRole]
+on [dbo].[Subscriptions]
 after insert
 as
 begin
-if exists 
+if not exists 
 	(select 1 from UserToRole utr 
 	join inserted i on i.UserID=utr.UserID 
 	where RoleID=1)
@@ -1698,7 +1711,7 @@ BEGIN
 
         IF @@ROWCOUNT = 0
         BEGIN
-            THROW 50000, 'No user found with the specified UserID.', 1;
+            THROW 50000, 'Nie znaleziono użytkownika o podanym ID', 1;
         END
     END TRY
     BEGIN CATCH
