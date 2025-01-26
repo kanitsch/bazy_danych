@@ -545,14 +545,22 @@ ALTER TABLE Translations ADD CONSTRAINT Translations_Users
 **vProductFreeSeats** - pokazuje wszystkie produkty wraz z aktualną liczbą wolnych miejsc 
 (wszystkie role) 
 ``` SQL
-CREATE or alter VIEW [dbo].[vProductFreeSeats]
+alter   VIEW [dbo].[vProductFreeSeats]
 AS
-SELECT    p.Description, p.EntryFee, p.FullPrice, p.ProductName, pt.ProductTypeName, dbo.freeseats(p.productid) 
-FROM       Products p
-         , ProductTypes pt
-where p.ProductTypeID = pt.ProductTypeID
-and p.IsActive = 1
-GO
+SELECT 
+    p.Description, 
+    p.EntryFee, 
+    p.FullPrice, 
+    p.ProductName, 
+    pt.ProductTypeName, 
+	p.maxseats,
+    dbo.freeseats(p.productid) AS FreeSeats
+FROM 
+    Products p
+    INNER JOIN ProductTypes pt ON p.ProductTypeID = pt.ProductTypeID
+WHERE 
+    p.IsActive = 1
+	and pt.IsForSale=1
 
 ```
 **debtors_list** - lista dłużników, czyli osób, które skorzystały z usług, ale nie uiściły opłat
@@ -667,22 +675,27 @@ and ReceivedDiploma=0
 **freeseats** - pokazuje liczbę wolnych miejsc dla produktu o podanym ID
 (wszystkie role)
 ``` SQL
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-
-ALTER   FUNCTION [dbo].[freeseats]
-(	
-	@p_productid as int
+ALTER   FUNCTION [dbo].[FreeSeats]
+(
+    @p_productid INT
 )
-RETURNS int 
+RETURNS INT
 AS
-begin
-	return (SELECT max(p.MaxSeats) -count(s.productid)  from Subscriptions s, Products p
-	where s.ProductID = p.ProductID and
-	s.ProductID = @p_productid)
-end
+BEGIN
+    RETURN (
+        SELECT 
+            MAX(p.MaxSeats) - COUNT(s.ProductID)
+        FROM 
+            Products p
+        LEFT JOIN 
+            Subscriptions s 
+            ON (dbo.GetFinalProductID(s.ProductID) = p.ProductID 
+            or dbo.GetFinalProductID(p.ProductID)=s.ProductID
+            or p.ProductID=s.ProductID)
+        WHERE 
+            p.ProductID = @p_productid
+    );
+END;
 ```
 **getProfits** - pokazuje zyski ze sprzedaży produktów dla podanego okresu
 (Dyrektor, Księgowy)
@@ -864,6 +877,35 @@ return(
 select min(startdate) from Meetings m
 where dbo.GetFinalProductID(m.ProductID)=@ProductID)
 end
+```
+**getUsersSubscriptions** - zwraca tabelę z subskrypcjami danego użutkownika i informacją o stanie zaliczenia/otrzymania dyplomu
+(Klient)
+```sql
+create function getUsersSubscriptions(@UserId int)
+returns table
+as
+return
+(select s.SubID, s.ProductID, ProductName, AccessAllowed, PaymentDeadline, IsPassed, ReceivedDiploma
+from Subscriptions s
+join Products p
+on p.ProductID=s.ProductID
+where userid=@UserId)
+```
+**availableTranslations** - zwraca tabelę z dostępnymi tłumaczeniami na danym spotkaniu.
+(wszyscy użytkownicy)
+```sql
+create function availableTranslations(@MeetingID int)
+returns table
+as
+return(
+select targetLanguageID, LanguageName, TranslatorID, FirstName, LastName
+from Translations t
+join Users u
+on u.UserID=t.TranslatorID
+join Languages l
+on l.LanguageID=t.TargetLanguageID
+where MeetingID=@MeetingID
+)
 ```
 ## Triggery
 
@@ -1170,7 +1212,7 @@ BEGIN
 END;
 GO
 ```
-**checkUsersRole** - sprawdza czy użytkownik wpisywany do tabeli Subscriptions jest klientem. W przeciwnym razie rzuca błąd i cofa transakcję.
+<!-- **checkUsersRole** - sprawdza czy użytkownik wpisywany do tabeli Subscriptions jest klientem. W przeciwnym razie rzuca błąd i cofa transakcję.
 ```SQL
 ALTER trigger [dbo].[checkUsersRole]
 on [dbo].[Subscriptions]
@@ -1186,7 +1228,7 @@ if not exists
         ROLLBACK TRANSACTION;
     END;
 end
-```
+``` -->
 **checkComponentsProduct** - nie pozwala dodać do tabeli EduComponents komponentu należącego do innych produktów niż semstr lub kurs.
 ```SQL
 create trigger checkComponentsProduct
@@ -1400,7 +1442,7 @@ BEGIN
 
 END
 ```
-**AddToBasket** - funkcja dodaje produkt do koszyka danego użytkownika (z OnlyAdvance ustawionym na 0).
+**AddToBasket** - dodaje produkt do koszyka danego użytkownika (z OnlyAdvance ustawionym na 0).
 (Klient)
 ```SQL
 ALTER PROCEDURE [dbo].[AddToBasket]
@@ -1533,7 +1575,96 @@ end;
 **BuyNow** - przenosi produkty danego użytkownika z koszyka do subskrypcji z AccessAllowed ustawionym na 0
 (wyjątek - darmowe webinary - AccessAllowed jest wtedy ustawiony na 1).
 (Klient)
-```SQL 
+``` SQL
+ALTER PROCEDURE [dbo].[BuyNow]
+    @UserID INT
+AS
+BEGIN
+EXEC removeUnpaidSubscriptions;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        IF NOT EXISTS (
+            SELECT 1 FROM Basket WHERE UserID = @UserID
+        )
+        BEGIN
+            THROW 50000, 'Podany użytkownik nie posiada produktów w koszyku', 1;
+        END;
+        IF EXISTS (
+            SELECT 1 
+            FROM Subscriptions s
+            JOIN Basket b ON b.UserID = s.UserID
+            WHERE s.UserID = @UserID AND s.ProductID = b.ProductID
+        )
+        BEGIN
+            THROW 50000, 'Podany użytkownik posiada już subskrypcję na produkt ...', 1;
+        END;
+
+        IF EXISTS (
+            SELECT ProductID
+            FROM Basket b
+            WHERE UserID = @UserID AND dbo.FreeSeats(ProductID) = 0
+        )
+        BEGIN
+            THROW 50000, 'Brak miejsc na produkt ...', 1;
+        END;
+
+        INSERT INTO Subscriptions (UserID, ProductID, AccessAllowed, PaymentDeadline)
+        SELECT DISTINCT UserID, p.ProductID, 0, DATEADD(MINUTE, 15, GETDATE())
+        FROM Basket b
+        JOIN Products p ON p.ProductID = b.ProductID
+        WHERE UserID = @UserID AND p.FullPrice IS NOT NULL;
+
+        DECLARE @Subscriptions TABLE (SubID INT, ProductID INT);
+        INSERT INTO @Subscriptions (SubID, ProductID)
+        SELECT DISTINCT s.SubID, s.ProductID
+        FROM Subscriptions s
+        JOIN Basket b ON b.ProductID = s.ProductID
+        WHERE s.UserID = @UserID AND b.UserID = @UserID;
+
+        IF EXISTS (SELECT 1 FROM @Subscriptions)
+        BEGIN
+
+            DECLARE @MainPaymentLink NVARCHAR(64);
+            SET @MainPaymentLink = CONCAT('https://payment.', NEWID(), '.pl');
+
+            INSERT INTO Payments (IsPaid, Link)
+            VALUES (0, @MainPaymentLink);
+
+            DECLARE @MainPaymentID INT = SCOPE_IDENTITY();
+
+            INSERT INTO PaymentDetails (PaymentID, SubID, Value)
+            SELECT DISTINCT
+                @MainPaymentID, 
+                s.SubID, 
+                CASE 
+                    WHEN b.OnlyAdvance = 0 THEN p.FullPrice
+                    ELSE p.EntryFee
+                END AS Value
+            FROM @Subscriptions s
+            JOIN Products p ON s.ProductID = p.ProductID
+            JOIN Basket b ON b.ProductID = p.ProductID AND b.UserID = @UserID
+            WHERE p.SuperID IS NULL;
+        END;
+
+        INSERT INTO Subscriptions (UserID, ProductID, AccessAllowed)
+        SELECT DISTINCT UserID, p.ProductID, 1
+        FROM Basket b
+        JOIN Products p ON p.ProductID = b.ProductID AND b.OnlyAdvance = 0
+        WHERE UserID = @UserID AND p.FullPrice IS NULL;
+
+        DELETE FROM Basket WHERE UserID = @UserID;
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+        BEGIN
+            ROLLBACK TRANSACTION;
+        END;
+        THROW;
+    END CATCH;
+END;
+```
+<!-- ```SQL 
 ALTER PROCEDURE [dbo].[BuyNow]
     @UserID INT
 AS
@@ -1619,7 +1750,7 @@ BEGIN
 DELETE FROM Basket WHERE UserID = @UserID;
 COMMIT TRANSACTION;
 END;
-```
+``` -->
 **removeUnpaidSubscriptions** - usuwa subskrypcje, które nie mają przyznanego dostępu, a upłynął termin płatności (usuwa również dane tych płatności).
 ```SQL
 ALTER procedure [dbo].[removeUnpaidSubscriptions]
@@ -1700,7 +1831,7 @@ BEGIN
     END CATCH;
 END;
 ```
-**registerUser** - rejestracja użytkownika bez podania roli i adresu (adres jest wymagany tylko dla klientów) - funkcja administratora
+**registerUser** - rejestracja użytkownika bez podania roli i adresu (adres jest wymagany tylko dla klientów)
 (Administrator)
 ```SQL
 CREATE PROCEDURE registerUser
@@ -1823,7 +1954,7 @@ BEGIN
 
 END
 ```
-**ReceivedDiploma** - funkcja do zaznaczenie przez dyrektora kto i za co otrzymał dyplom.
+**ReceivedDiploma** - procedura do zaznaczenie przez dyrektora kto i za co otrzymał dyplom.
 (Dyrektor)
 ```SQL
 alter procedure ReceivedDiploma
