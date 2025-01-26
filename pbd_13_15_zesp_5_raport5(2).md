@@ -1240,10 +1240,10 @@ BEGIN
     JOIN Products sp ON p.SuperID = sp.ProductID
 	JOIN EduComponents ec on p.ProductID = ec.ProductID
 	JOIN ProductTypes pt on sp.ProductTypeID = pt.ProductTypeID
-	WHERE sp.ProductName = @studyName and pt.ProductTypeName = 'Studia'
+	WHERE sp.Alias = @studyName and pt.ProductTypeName = 'Studia'
 	ORDER BY p.ProductName, ec.Name
-	
 END
+
 ```
 **getSyllabusSemester** - zwraca syllabus dla danego semestru albo kursu
 (wszystkie role)
@@ -1327,30 +1327,55 @@ END
 ```SQL
 ALTER   PROCEDURE [dbo].[getUserComponentAttendance]
 	-- Add the parameters for the stored procedure here
-	@userName nvarchar(MAX),
-	@componentName nvarchar(MAX)
+	@userName nvarchar(MAX) = '',
+	@userID int = -1,
+	@componentID int
 AS
 BEGIN
 	-- SET NOCOUNT ON added to prevent extra result sets from
 	-- interfering with SELECT statements.
 	SET NOCOUNT ON;
 
+	IF @userID = -1 AND dbo.studentNameToUserIdNum(@userName) > 1
+	BEGIN
+		throw 51000, 'Wielu uczniów o tym samym imieniu i nazwisku', 1;
+	END
+
     -- Insert statements for procedure here
-	SELECT m.MeetingID, m.StartDate, a.Presence
-	FROM Attendance a join Subscriptions s on s.SubID = a.SubID
-	join Users u on s.UserID = u.UserID
-	join Meetings m on m.MeetingID = a.MeetingID
-	join EduComponents ec on ec.ComponentID = m.ComponentID
-	WHERE CONCAT(u.FirstName,' ',u.LastName) = @userName and ec.Name = @componentName
-	ORDER BY m.StartDate
+	IF @userID = -1
+	begin
+		SELECT m.MeetingID, m.StartDate, a.Presence
+		FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+		join Users u on s.UserID = u.UserID
+		join Meetings m on m.MeetingID = a.MeetingID
+		join EduComponents ec on ec.ComponentID = m.ComponentID
+		WHERE CONCAT(u.FirstName,' ',u.LastName) = @userName and ec.ComponentID = @componentID
+		ORDER BY m.StartDate
 
-	SELECT avg(CAST(a.Presence as float)) as Frequency
-	FROM Attendance a join Subscriptions s on s.SubID = a.SubID
-	join Users u on s.UserID = u.UserID
-	join Meetings m on m.MeetingID = a.MeetingID
-	join EduComponents ec on ec.ComponentID = m.ComponentID
-	WHERE CONCAT(u.FirstName,' ',u.LastName) = @userName and ec.Name = @componentName
+		SELECT avg(CAST(a.Presence as float)) as Frequency
+		FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+		join Users u on s.UserID = u.UserID
+		join Meetings m on m.MeetingID = a.MeetingID
+		join EduComponents ec on ec.ComponentID = m.ComponentID
+		WHERE CONCAT(u.FirstName,' ',u.LastName) = @userName and ec.ComponentID = @componentID
+	end
+	else
+	begin
+		SELECT m.MeetingID, m.StartDate, a.Presence
+		FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+		join Users u on s.UserID = u.UserID
+		join Meetings m on m.MeetingID = a.MeetingID
+		join EduComponents ec on ec.ComponentID = m.ComponentID
+		WHERE u.UserID = @userID and ec.ComponentID = @componentID
+		ORDER BY m.StartDate
 
+		SELECT avg(CAST(a.Presence as float)) as Frequency
+		FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+		join Users u on s.UserID = u.UserID
+		join Meetings m on m.MeetingID = a.MeetingID
+		join EduComponents ec on ec.ComponentID = m.ComponentID
+		WHERE u.UserID = @userID and ec.ComponentID = @componentID
+	end
 END
 ```
 
@@ -1359,8 +1384,9 @@ END
 ```SQL
 ALTER   PROCEDURE [dbo].[getUserSubjectGrades]
 	-- Add the parameters for the stored procedure here
-	@userName nvarchar(MAX),
-	@subjectName nvarchar(MAX)
+	@userID int = -1,
+	@userName nvarchar(MAX) = '',
+	@subjectID nvarchar(MAX)
 
 AS
 BEGIN
@@ -1368,36 +1394,75 @@ BEGIN
 	-- interfering with SELECT statements.
 	SET NOCOUNT ON;
 
+	IF @userID = -1 AND dbo.studentNameToUserIdNum(@userName) > 1
+	BEGIN
+		throw 51000, 'Wielu uczniów o tym samym imieniu i nazwisku', 1;
+	END
+
     -- Insert statements for procedure here
-	SELECT CAST(m.StartDate as date) as 'Date', a.Grade as 'Grade', m.MeetingType as 'Type'
-	FROM Attendance a join Subscriptions s on s.SubID = a.SubID
-	join Users u on u.UserID = s.UserID
-	join Meetings m on m.MeetingID = a.MeetingID
-	join EduComponents ec on ec.ComponentID = m.ComponentID
-	WHERE CONCAT(u.FirstName, ' ', u.LastName) = @userName and a.Grade is not NULL and
-		ec.Name = @subjectName
-	ORDER BY m.StartDate
+	if @userID = -1
+	begin
+		SELECT CAST(m.StartDate as date) as 'Date', a.Grade as 'Grade', m.MeetingType as 'Type'
+		FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+		join Users u on u.UserID = s.UserID
+		join Meetings m on m.MeetingID = a.MeetingID
+		join EduComponents ec on ec.ComponentID = m.ComponentID
+		WHERE CONCAT(u.FirstName, ' ', u.LastName) = @userName and a.Grade is not NULL and
+			ec.ComponentID = @subjectID
+		ORDER BY m.StartDate
+	end
+	else
+	begin
+		SELECT CAST(m.StartDate as date) as 'Date', a.Grade as 'Grade', m.MeetingType as 'Type'
+		FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+		join Users u on u.UserID = s.UserID
+		join Meetings m on m.MeetingID = a.MeetingID
+		join EduComponents ec on ec.ComponentID = m.ComponentID
+		WHERE u.UserID = @userID and a.Grade is not NULL and
+			ec.ComponentID = @subjectID
+		ORDER BY m.StartDate
+	end
 END
 ```
 **getAllUserGrades** - zwraca wszystkie oceny użytkownika
 (Klient, Dyrektor)
 ```SQL
 ALTER   PROCEDURE [dbo].[getAllUserGrades]
+	-- Add the parameters for the stored procedure here
+	@userName nvarchar(MAX) = '',
+	@userID int = -1
 
-	@userName nvarchar(MAX)
 AS
 BEGIN
+	-- SET NOCOUNT ON added to prevent extra result sets from
+	-- interfering with SELECT statements.
 	SET NOCOUNT ON;
-
-
-	SELECT ec.Name as Subject, STRING_AGG(CAST(a.GRADE AS nvarchar), '; ') AS GradeList, CAST(avg(a.Grade)as decimal(10,2)) as Average
-	FROM Attendance a join Subscriptions s on s.SubID = a.SubID
-	join Users u on u.UserID = s.UserID
-	join Meetings m on m.MeetingID = a.MeetingID
-	join EduComponents ec on ec.ComponentID = m.ComponentID
-	WHERE CONCAT(u.FirstName, ' ', u.LastName) = @userName and a.Grade is not NULL
-	GROUP BY ec.Name
-
+	
+	IF @userID = -1 AND dbo.studentNameToUserIdNum(@userName) > 1
+	BEGIN
+		throw 51000, 'Wielu uczniów o tym samym imieniu i nazwisku', 1;
+	END
+    
+	IF @userID = -1
+	begin
+		SELECT ec.Name as Subject, STRING_AGG(CAST(a.GRADE AS nvarchar), '; ') AS GradeList, CAST(avg(a.Grade)as decimal(10,2)) as Average
+		FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+		join Users u on u.UserID = s.UserID
+		join Meetings m on m.MeetingID = a.MeetingID
+		join EduComponents ec on ec.ComponentID = m.ComponentID
+		WHERE (CONCAT(u.FirstName, ' ', u.LastName) = @userName) and a.Grade is not NULL
+		GROUP BY ec.Name
+	end
+	else
+	begin
+		SELECT ec.Name as Subject, STRING_AGG(CAST(a.GRADE AS nvarchar), '; ') AS GradeList, CAST(avg(a.Grade)as decimal(10,2)) as Average
+		FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+		join Users u on u.UserID = s.UserID
+		join Meetings m on m.MeetingID = a.MeetingID
+		join EduComponents ec on ec.ComponentID = m.ComponentID
+		WHERE u.UserID = @userID and a.Grade is not NULL
+		GROUP BY ec.Name
+	end
 END
 ```
 **AddToBasket** - funkcja dodaje produkt do koszyka danego użytkownika (z OnlyAdvance ustawionym na 0).
@@ -1848,3 +1913,67 @@ begin catch
 END CATCH
 end
 ```
+TeacherSchedule - plan nadchodzących spotkań nauczyciela
+(Nauczyciel, Dyrektor)
+``` SQL
+CREATE or ALTER PROCEDURE TeacherSchedule
+	@teacherID int,
+	@todayDate date
+AS
+BEGIN
+	SET NOCOUNT ON;
+	SELECT *
+	FROM Meetings m 
+	WHERE m.TeacherID = @teacherID and m.StartDate > @todayDate
+	order by m.StartDate
+END
+GO
+```
+TranslatorSchedule - plan nadchodzących spotkań dla tłumacza
+(Tłumacz, Dyrektor)
+``` SQL
+ALTER   PROCEDURE [dbo].[TranslatorSchedule]
+	-- Add the parameters for the stored procedure here
+	@translatorID int,
+	@todayDate date
+AS
+BEGIN
+	-- SET NOCOUNT ON added to prevent extra result sets from
+	-- interfering with SELECT statements.
+	SET NOCOUNT ON;
+
+    -- Insert statements for procedure here
+	SELECT *
+	FROM Meetings m
+	JOIN Translations t on t.MeetingID = m.MeetingID
+	WHERE t.TranslatorID = @translatorID and m.StartDate > @todayDate
+END
+```
+
+``` SQL
+CREATE or Alter PROCEDURE ProductSiege 
+
+	@todayDate date
+AS
+BEGIN
+
+	SET NOCOUNT ON;
+
+	SELECT p.ProductID, p.ProductName, 
+		(select pt.ProductTypeName 
+		from ProductTypes pt 
+		where p.ProductTypeID = pt.ProductTypeID) as Type,
+		dbo.FindStartDate(p.ProductID) as [Start Date], 
+		dbo.FreeSeats(p.ProductID) as [Free Seats],
+		p.MaxSeats,
+		(select count(*)
+		from Subscriptions s
+		where s.ProductID = p.ProductID
+		) as [People Enrolled]
+	FROM Products p 
+	WHERE dbo.FindStartDate(p.ProductID) > @todayDate
+	ORDER BY [Start Date]
+END
+GO
+```
+
