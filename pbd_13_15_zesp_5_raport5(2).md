@@ -896,6 +896,7 @@ select min(startdate) from Meetings m
 where dbo.GetFinalProductID(m.ProductID)=@ProductID)
 end
 ```
+
 **getUsersSubscriptions** - zwraca tabelę z subskrypcjami danego użutkownika i informacją o stanie zaliczenia/otrzymania dyplomu
 (Klient)
 [KN]
@@ -927,6 +928,90 @@ on l.LanguageID=t.TargetLanguageID
 where MeetingID=@MeetingID
 )
 ```
+
+**areExamsPassed** - sprawdza czy wszystkie egzaminy w ramach danego przedmiotu są zaliczone
+``` SQL
+ALTER FUNCTION [dbo].[areExamsPassed]
+(
+	-- Add the parameters for the function here
+	@userID int, @compID int
+
+)
+RETURNS bit
+AS
+BEGIN
+	-- Declare the return variable here
+	DECLARE @result bit
+
+	-- Add the T-SQL statements to compute the return value here
+	SET @result = CASE
+                 WHEN NOT EXISTS (
+                     SELECT 1
+                     FROM Attendance a
+                     JOIN Subscriptions s ON s.SubID = a.SubID
+                     JOIN Meetings m ON m.MeetingID = a.MeetingID
+                     WHERE s.UserID = @userID
+                     AND m.ComponentID = @compID
+                     AND a.grade NOT IN (2, 0)
+                 ) THEN 1
+                 ELSE 0
+              END;
+
+	-- Return the result of the function
+	RETURN @result
+
+END
+
+```
+
+**calculateFrequency** - sprawdza czy klient spełnił wymagania zaliczenia dotyczące obecności
+``` SQL
+ALTER   FUNCTION [dbo].[calculateFrequency]
+(
+	-- Add the parameters for the function here
+	@compID int, @userID int
+)
+RETURNS bit
+AS
+BEGIN
+	-- Declare the return variable here
+	DECLARE @result bit
+
+	-- Add the T-SQL statements to compute the return value here
+	DECLARE @allCnt int
+	if (select count(*) from Meetings m
+	join Attendance a on a.MeetingID = m.MeetingID
+	join Subscriptions s on s.SubID = a.SubID
+	where m.ComponentID = @compID and s.UserID = @userID) > 0
+	begin 
+	
+
+		SET @allCnt = (select count(*) from Meetings m
+		join Attendance a on a.MeetingID = m.MeetingID
+		join Subscriptions s on s.SubID = a.SubID
+		where m.ComponentID = @compID and s.UserID = @userID and a.Presence = 1) /
+		(select count(*) from Meetings m
+		join Attendance a on a.MeetingID = m.MeetingID
+		join Subscriptions s on s.SubID = a.SubID
+		where m.ComponentID = @compID and s.UserID = @userID)
+
+		SET @result = CASE 
+					 WHEN @allCnt >= ISNULL((SELECT FreqToPass FROM EduComponents WHERE ComponentID = @compID), 0) 
+					 THEN 1
+					 ELSE 0
+				  END;
+	end
+	else 
+	begin 
+		set @result = 1
+	end
+	-- Return the result of the function
+	RETURN @result
+
+END
+
+```
+
 ## Triggery
 
 
@@ -1311,10 +1396,10 @@ BEGIN
     JOIN Products sp ON p.SuperID = sp.ProductID
 	JOIN EduComponents ec on p.ProductID = ec.ProductID
 	JOIN ProductTypes pt on sp.ProductTypeID = pt.ProductTypeID
-	WHERE sp.ProductName = @studyName and pt.ProductTypeName = 'Studia'
+	WHERE sp.Alias = @studyName and pt.ProductTypeName = 'Studia'
 	ORDER BY p.ProductName, ec.Name
-	
 END
+
 ```
 **getSyllabusSemester** - zwraca syllabus dla danego semestru albo kursu
 (wszystkie role)
@@ -1401,30 +1486,55 @@ END
 ```SQL
 ALTER   PROCEDURE [dbo].[getUserComponentAttendance]
 	-- Add the parameters for the stored procedure here
-	@userName nvarchar(MAX),
-	@componentName nvarchar(MAX)
+	@userName nvarchar(MAX) = '',
+	@userID int = -1,
+	@componentID int
 AS
 BEGIN
 	-- SET NOCOUNT ON added to prevent extra result sets from
 	-- interfering with SELECT statements.
 	SET NOCOUNT ON;
 
+	IF @userID = -1 AND dbo.studentNameToUserIdNum(@userName) > 1
+	BEGIN
+		throw 51000, 'Wielu uczniów o tym samym imieniu i nazwisku', 1;
+	END
+
     -- Insert statements for procedure here
-	SELECT m.MeetingID, m.StartDate, a.Presence
-	FROM Attendance a join Subscriptions s on s.SubID = a.SubID
-	join Users u on s.UserID = u.UserID
-	join Meetings m on m.MeetingID = a.MeetingID
-	join EduComponents ec on ec.ComponentID = m.ComponentID
-	WHERE CONCAT(u.FirstName,' ',u.LastName) = @userName and ec.Name = @componentName
-	ORDER BY m.StartDate
+	IF @userID = -1
+	begin
+		SELECT m.MeetingID, m.StartDate, a.Presence
+		FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+		join Users u on s.UserID = u.UserID
+		join Meetings m on m.MeetingID = a.MeetingID
+		join EduComponents ec on ec.ComponentID = m.ComponentID
+		WHERE CONCAT(u.FirstName,' ',u.LastName) = @userName and ec.ComponentID = @componentID
+		ORDER BY m.StartDate
 
-	SELECT avg(CAST(a.Presence as float)) as Frequency
-	FROM Attendance a join Subscriptions s on s.SubID = a.SubID
-	join Users u on s.UserID = u.UserID
-	join Meetings m on m.MeetingID = a.MeetingID
-	join EduComponents ec on ec.ComponentID = m.ComponentID
-	WHERE CONCAT(u.FirstName,' ',u.LastName) = @userName and ec.Name = @componentName
+		SELECT avg(CAST(a.Presence as float)) as Frequency
+		FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+		join Users u on s.UserID = u.UserID
+		join Meetings m on m.MeetingID = a.MeetingID
+		join EduComponents ec on ec.ComponentID = m.ComponentID
+		WHERE CONCAT(u.FirstName,' ',u.LastName) = @userName and ec.ComponentID = @componentID
+	end
+	else
+	begin
+		SELECT m.MeetingID, m.StartDate, a.Presence
+		FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+		join Users u on s.UserID = u.UserID
+		join Meetings m on m.MeetingID = a.MeetingID
+		join EduComponents ec on ec.ComponentID = m.ComponentID
+		WHERE u.UserID = @userID and ec.ComponentID = @componentID
+		ORDER BY m.StartDate
 
+		SELECT avg(CAST(a.Presence as float)) as Frequency
+		FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+		join Users u on s.UserID = u.UserID
+		join Meetings m on m.MeetingID = a.MeetingID
+		join EduComponents ec on ec.ComponentID = m.ComponentID
+		WHERE u.UserID = @userID and ec.ComponentID = @componentID
+	end
 END
 ```
 
@@ -1434,8 +1544,9 @@ END
 ```SQL
 ALTER   PROCEDURE [dbo].[getUserSubjectGrades]
 	-- Add the parameters for the stored procedure here
-	@userName nvarchar(MAX),
-	@subjectName nvarchar(MAX)
+	@userID int = -1,
+	@userName nvarchar(MAX) = '',
+	@subjectID nvarchar(MAX)
 
 AS
 BEGIN
@@ -1443,15 +1554,34 @@ BEGIN
 	-- interfering with SELECT statements.
 	SET NOCOUNT ON;
 
+	IF @userID = -1 AND dbo.studentNameToUserIdNum(@userName) > 1
+	BEGIN
+		throw 51000, 'Wielu uczniów o tym samym imieniu i nazwisku', 1;
+	END
+
     -- Insert statements for procedure here
-	SELECT CAST(m.StartDate as date) as 'Date', a.Grade as 'Grade', m.MeetingType as 'Type'
-	FROM Attendance a join Subscriptions s on s.SubID = a.SubID
-	join Users u on u.UserID = s.UserID
-	join Meetings m on m.MeetingID = a.MeetingID
-	join EduComponents ec on ec.ComponentID = m.ComponentID
-	WHERE CONCAT(u.FirstName, ' ', u.LastName) = @userName and a.Grade is not NULL and
-		ec.Name = @subjectName
-	ORDER BY m.StartDate
+	if @userID = -1
+	begin
+		SELECT CAST(m.StartDate as date) as 'Date', a.Grade as 'Grade', m.MeetingType as 'Type'
+		FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+		join Users u on u.UserID = s.UserID
+		join Meetings m on m.MeetingID = a.MeetingID
+		join EduComponents ec on ec.ComponentID = m.ComponentID
+		WHERE CONCAT(u.FirstName, ' ', u.LastName) = @userName and a.Grade is not NULL and
+			ec.ComponentID = @subjectID
+		ORDER BY m.StartDate
+	end
+	else
+	begin
+		SELECT CAST(m.StartDate as date) as 'Date', a.Grade as 'Grade', m.MeetingType as 'Type'
+		FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+		join Users u on u.UserID = s.UserID
+		join Meetings m on m.MeetingID = a.MeetingID
+		join EduComponents ec on ec.ComponentID = m.ComponentID
+		WHERE u.UserID = @userID and a.Grade is not NULL and
+			ec.ComponentID = @subjectID
+		ORDER BY m.StartDate
+	end
 END
 ```
 **getAllUserGrades** - zwraca wszystkie oceny użytkownika
@@ -1459,21 +1589,41 @@ END
 [WN]
 ```SQL
 ALTER   PROCEDURE [dbo].[getAllUserGrades]
+	-- Add the parameters for the stored procedure here
+	@userName nvarchar(MAX) = '',
+	@userID int = -1
 
-	@userName nvarchar(MAX)
 AS
 BEGIN
+	-- SET NOCOUNT ON added to prevent extra result sets from
+	-- interfering with SELECT statements.
 	SET NOCOUNT ON;
-
-
-	SELECT ec.Name as Subject, STRING_AGG(CAST(a.GRADE AS nvarchar), '; ') AS GradeList, CAST(avg(a.Grade)as decimal(10,2)) as Average
-	FROM Attendance a join Subscriptions s on s.SubID = a.SubID
-	join Users u on u.UserID = s.UserID
-	join Meetings m on m.MeetingID = a.MeetingID
-	join EduComponents ec on ec.ComponentID = m.ComponentID
-	WHERE CONCAT(u.FirstName, ' ', u.LastName) = @userName and a.Grade is not NULL
-	GROUP BY ec.Name
-
+	
+	IF @userID = -1 AND dbo.studentNameToUserIdNum(@userName) > 1
+	BEGIN
+		throw 51000, 'Wielu uczniów o tym samym imieniu i nazwisku', 1;
+	END
+    
+	IF @userID = -1
+	begin
+		SELECT ec.Name as Subject, STRING_AGG(CAST(a.GRADE AS nvarchar), '; ') AS GradeList, CAST(avg(a.Grade)as decimal(10,2)) as Average
+		FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+		join Users u on u.UserID = s.UserID
+		join Meetings m on m.MeetingID = a.MeetingID
+		join EduComponents ec on ec.ComponentID = m.ComponentID
+		WHERE (CONCAT(u.FirstName, ' ', u.LastName) = @userName) and a.Grade is not NULL
+		GROUP BY ec.Name
+	end
+	else
+	begin
+		SELECT ec.Name as Subject, STRING_AGG(CAST(a.GRADE AS nvarchar), '; ') AS GradeList, CAST(avg(a.Grade)as decimal(10,2)) as Average
+		FROM Attendance a join Subscriptions s on s.SubID = a.SubID
+		join Users u on u.UserID = s.UserID
+		join Meetings m on m.MeetingID = a.MeetingID
+		join EduComponents ec on ec.ComponentID = m.ComponentID
+		WHERE u.UserID = @userID and a.Grade is not NULL
+		GROUP BY ec.Name
+	end
 END
 ```
 **AddToBasket** - dodaje produkt do koszyka danego użytkownika (z OnlyAdvance ustawionym na 0).
@@ -2025,3 +2175,97 @@ begin catch
 END CATCH
 end
 ```
+TeacherSchedule - plan nadchodzących spotkań nauczyciela
+(Nauczyciel, Dyrektor)
+``` SQL
+CREATE or ALTER PROCEDURE TeacherSchedule
+	@teacherID int,
+	@todayDate date
+AS
+BEGIN
+	SET NOCOUNT ON;
+	SELECT *
+	FROM Meetings m 
+	WHERE m.TeacherID = @teacherID and m.StartDate > @todayDate
+	order by m.StartDate
+END
+GO
+```
+TranslatorSchedule - plan nadchodzących spotkań dla tłumacza
+(Tłumacz, Dyrektor)
+``` SQL
+ALTER   PROCEDURE [dbo].[TranslatorSchedule]
+	-- Add the parameters for the stored procedure here
+	@translatorID int,
+	@todayDate date
+AS
+BEGIN
+	-- SET NOCOUNT ON added to prevent extra result sets from
+	-- interfering with SELECT statements.
+	SET NOCOUNT ON;
+
+    -- Insert statements for procedure here
+	SELECT *
+	FROM Meetings m
+	JOIN Translations t on t.MeetingID = m.MeetingID
+	WHERE t.TranslatorID = @translatorID and m.StartDate > @todayDate
+END
+```
+ProductSiege - pokazuje obleganie produktów
+``` SQL
+CREATE or Alter PROCEDURE ProductSiege 
+
+	@todayDate date
+AS
+BEGIN
+
+	SET NOCOUNT ON;
+
+	SELECT p.ProductID, p.ProductName, 
+		(select pt.ProductTypeName 
+		from ProductTypes pt 
+		where p.ProductTypeID = pt.ProductTypeID) as Type,
+		dbo.FindStartDate(p.ProductID) as [Start Date], 
+		dbo.FreeSeats(p.ProductID) as [Free Seats],
+		p.MaxSeats,
+		(select count(*)
+		from Subscriptions s
+		where s.ProductID = p.ProductID
+		) as [People Enrolled]
+	FROM Products p 
+	WHERE dbo.FindStartDate(p.ProductID) > @todayDate
+	ORDER BY [Start Date]
+END
+GO
+```
+
+ProductPassUpdate - aktualizacja statusu zaliczenia produktu na podstawie obecności oraz ocen z egznaminów
+(Administrator, Nauczyciel)
+``` SQL
+ALTER PROCEDURE [dbo].[ProductPassUpdate]
+    @userID INT,
+    @prodID INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM EduComponents ec
+        WHERE ec.ProductID = @prodID
+        AND (dbo.areExamsPassed(@userID, ec.ComponentID) = 0 
+             OR dbo.calculateFrequency(@userID, ec.ComponentID) = 0)
+    )
+    and EXISTS (
+        SELECT s.SubID
+        FROM Subscriptions s
+        WHERE s.ProductID = @prodID AND s.UserID = @userID AND s.isPassed = 0
+    )
+    BEGIN
+
+        UPDATE Subscriptions
+        SET isPassed = 1
+        WHERE ProductID = @prodID AND UserID = @userID;
+    END
+END;
+```
+
